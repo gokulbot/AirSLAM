@@ -64,6 +64,10 @@ docker pull xukuanhit/air_slam:v4
 docker run -it --env DISPLAY=$DISPLAY --volume /tmp/.X11-unix:/tmp/.X11-unix --privileged --runtime nvidia --gpus all --volume ${PWD}:/workspace --workdir /workspace --name air_slam xukuanhit/air_slam:v4 /bin/bash
 ```
 
+### Jetson
+Due to ROS dependencies and certain operators used in PLNet, deploying AirSLAM on the Jetson platform requires a rather involved process. [This blog](https://blog.csdn.net/weixin_47586484/article/details/154980365?spm=1001.2014.3001.5502) provides a useful reference for that deployment.
+
+
 ## :book: Data
 The data for mapping should be organized in the following Autonomous Systems Lab (ASL) dataset format (imu data is optional):
 
