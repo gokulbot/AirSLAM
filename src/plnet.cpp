@@ -62,7 +62,7 @@ bool PLNet::build() {
   }
   profile_stage1->setDimensions("input", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(1, 1, 100, 100));
   profile_stage1->setDimensions("input", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(1, 1, 512, 512));
-  profile_stage1->setDimensions("input", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(1, 1, 1500, 1500));
+  profile_stage1->setDimensions("input", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(1, 1, 512, 512));  // actual is always 512x512
   config_stage1->addOptimizationProfile(profile_stage1);
 
   auto constructed_stage1 = construct_network_stage1(builder_stage1, network_stage1, config_stage1, parser_stage1);
@@ -132,13 +132,13 @@ bool PLNet::build() {
   profile_stage2->setDimensions("iskeep_index", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims2(50000, 1));
   profile_stage2->setDimensions("loi_features", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(1, 16, 16, 16));
   profile_stage2->setDimensions("loi_features", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(1, 128, 128, 128));
-  profile_stage2->setDimensions("loi_features", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(1, 512, 512, 512));
+  profile_stage2->setDimensions("loi_features", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(1, 128, 128, 128));  // actual is always 128^3
   profile_stage2->setDimensions("loi_features_thin", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(1, 4, 16, 16));
   profile_stage2->setDimensions("loi_features_thin", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(1, 4, 128, 128));
-  profile_stage2->setDimensions("loi_features_thin", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(1, 4, 512, 512));
+  profile_stage2->setDimensions("loi_features_thin", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(1, 4, 128, 128));
   profile_stage2->setDimensions("loi_features_aux", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(1, 4, 16, 16));
   profile_stage2->setDimensions("loi_features_aux", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(1, 4, 128, 128));
-  profile_stage2->setDimensions("loi_features_aux", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(1, 4, 512, 512));
+  profile_stage2->setDimensions("loi_features_aux", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(1, 4, 128, 128));
   config_stage2->addOptimizationProfile(profile_stage2);
 
   auto constructed_stage2 = construct_network_stage2(builder_stage2, network_stage2, config_stage2, parser_stage2);

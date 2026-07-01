@@ -46,9 +46,9 @@ bool SuperPoint::build() {
     profile->setDimensions(super_point_config_.input_tensor_names[0].c_str(),
                            nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(1, 1, 100, 100));
     profile->setDimensions(super_point_config_.input_tensor_names[0].c_str(),
-                           nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(1, 1, 500, 500));
+                           nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(1, 1, 512, 512));
     profile->setDimensions(super_point_config_.input_tensor_names[0].c_str(),
-                           nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(1, 1, 1500, 1500));
+                           nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(1, 1, 512, 512));  // actual is always 512x512
     config->addOptimizationProfile(profile);
     
     auto constructed = construct_network(builder, network, config, parser);
