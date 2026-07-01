@@ -115,11 +115,9 @@ bool SuperPoint::infer(const cv::Mat &image_, Eigen::Matrix<float, 259, Eigen::D
     cv::Mat image;
     cv::resize(image_, image, cv::Size(resized_width, resized_height));
 
-    assert(engine_->getNbBindings() == 3);
+    assert(engine_->getNbIOTensors() == 3);
 
-    const int input_index = engine_->getBindingIndex(super_point_config_.input_tensor_names[0].c_str());
-
-    context_->setBindingDimensions(input_index, nvinfer1::Dims4(1, 1, image.rows, image.cols));
+    context_->setInputShape(super_point_config_.input_tensor_names[0].c_str(), nvinfer1::Dims4(1, 1, image.rows, image.cols));
 
     BufferManager buffers(engine_, 0, context_.get());
     
@@ -130,7 +128,12 @@ bool SuperPoint::infer(const cv::Mat &image_, Eigen::Matrix<float, 259, Eigen::D
 
     buffers.copyInputToDevice();
 
-    bool status = context_->executeV2(buffers.getDeviceBindings().data());
+    buffers.setTensorAddresses(context_.get());
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
+    bool status = context_->enqueueV3(stream);
+    cudaStreamSynchronize(stream);
+    cudaStreamDestroy(stream);
     if (!status) {
         return false;
     }

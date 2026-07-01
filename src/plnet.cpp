@@ -30,22 +30,12 @@ bool PLNet::build() {
       }
     }
 
-    image_input_index_ = engine0_->getBindingIndex("input");
     if (!context1_) {
       context1_ = TensorRTUniquePtr<nvinfer1::IExecutionContext>(engine1_->createExecutionContext());
       if (!context1_) {
         return false;
       }
     }
-
-    juncs_pred_index_ = engine1_->getBindingIndex("juncs_pred");
-    lines_pred_index_ = engine1_->getBindingIndex("lines_pred");
-    idx_lines_for_junctions_index_ = engine1_->getBindingIndex("idx_lines_for_junctions");
-    inverse_index_ = engine1_->getBindingIndex("inverse");
-    is_keep_index_index_ = engine1_->getBindingIndex("iskeep_index");
-    loi_features_index_ = engine1_->getBindingIndex("loi_features");
-    loi_features_thin_index_ = engine1_->getBindingIndex("loi_features_thin");
-    loi_features_aux_index_ = engine1_->getBindingIndex("loi_features_aux");
     return true;
   }
   auto builder_stage1 = TensorRTUniquePtr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(gLogger.getTRTLogger()));
@@ -103,8 +93,6 @@ bool PLNet::build() {
       return false;
     }
   }
-
-  image_input_index_ = engine0_->getBindingIndex("input");
 
   auto builder_stage2 = TensorRTUniquePtr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(gLogger.getTRTLogger()));
   if (!builder_stage2) {
@@ -183,15 +171,6 @@ bool PLNet::build() {
     }
   }
 
-  juncs_pred_index_ = engine1_->getBindingIndex("juncs_pred");
-  lines_pred_index_ = engine1_->getBindingIndex("lines_pred");
-  idx_lines_for_junctions_index_ = engine1_->getBindingIndex("idx_lines_for_junctions");
-  inverse_index_ = engine1_->getBindingIndex("inverse");
-  is_keep_index_index_ = engine1_->getBindingIndex("iskeep_index");
-  loi_features_index_ = engine1_->getBindingIndex("loi_features");
-  loi_features_thin_index_ = engine1_->getBindingIndex("loi_features_thin");
-  loi_features_aux_index_ = engine1_->getBindingIndex("loi_features_aux");
-
   return true;
 }
 
@@ -221,7 +200,7 @@ bool PLNet::construct_network_stage2(TensorRTUniquePtr<nvinfer1::IBuilder> &buil
 bool PLNet::infer(const cv::Mat &image, Eigen::Matrix<float, 259, Eigen::Dynamic> &features, 
     std::vector<Eigen::Vector4d>& lines, Eigen::Matrix<float, 259, Eigen::Dynamic>& junctions, bool junction_detection) {
 
-  context0_->setBindingDimensions(image_input_index_, nvinfer1::Dims4(1, 1, resized_height, resized_width));
+  context0_->setInputShape("input", nvinfer1::Dims4(1, 1, resized_height, resized_width));
 
   BufferManager buffers0(engine0_, 0, context0_.get());
 
@@ -230,7 +209,12 @@ bool PLNet::infer(const cv::Mat &image, Eigen::Matrix<float, 259, Eigen::Dynamic
   }
   buffers0.copyInputToDevice();
 
-  bool status = context0_->executeV2(buffers0.getDeviceBindings().data());
+  buffers0.setTensorAddresses(context0_.get());
+  cudaStream_t stream0;
+  cudaStreamCreate(&stream0);
+  bool status = context0_->enqueueV3(stream0);
+  cudaStreamSynchronize(stream0);
+  cudaStreamDestroy(stream0);
   if (!status) {
     return false;
   }
@@ -465,14 +449,14 @@ bool PLNet::process_output(const BufferManager &buffers, Eigen::Matrix<float, 25
     return false;
   }
 
-  context1_->setBindingDimensions(juncs_pred_index_, nvinfer1::Dims2(300, 2));
-  context1_->setBindingDimensions(lines_pred_index_, nvinfer1::Dims2(128 * 128 * 3, 4));
-  context1_->setBindingDimensions(idx_lines_for_junctions_index_, nvinfer1::Dims2((int)idx_lines_for_junctions_unique_.size(), 2));
-  context1_->setBindingDimensions(inverse_index_, nvinfer1::Dims2((int)inverse_.size(), 1));
-  context1_->setBindingDimensions(is_keep_index_index_, nvinfer1::Dims2((int)is_keep_index_.size(), 1));
-  context1_->setBindingDimensions(loi_features_index_, nvinfer1::Dims4(1, 128, 128, 128));
-  context1_->setBindingDimensions(loi_features_thin_index_, nvinfer1::Dims4(1, 4, 128, 128));
-  context1_->setBindingDimensions(loi_features_aux_index_, nvinfer1::Dims4(1, 4, 128, 128));
+  context1_->setInputShape("juncs_pred", nvinfer1::Dims2(300, 2));
+  context1_->setInputShape("lines_pred", nvinfer1::Dims2(128 * 128 * 3, 4));
+  context1_->setInputShape("idx_lines_for_junctions", nvinfer1::Dims2((int)idx_lines_for_junctions_unique_.size(), 2));
+  context1_->setInputShape("inverse", nvinfer1::Dims2((int)inverse_.size(), 1));
+  context1_->setInputShape("iskeep_index", nvinfer1::Dims2((int)is_keep_index_.size(), 1));
+  context1_->setInputShape("loi_features", nvinfer1::Dims4(1, 128, 128, 128));
+  context1_->setInputShape("loi_features_thin", nvinfer1::Dims4(1, 4, 128, 128));
+  context1_->setInputShape("loi_features_aux", nvinfer1::Dims4(1, 4, 128, 128));
 
   BufferManager buffers1(engine1_, 0, context1_.get());
 
@@ -507,7 +491,12 @@ bool PLNet::process_output(const BufferManager &buffers, Eigen::Matrix<float, 25
   }
 
   buffers1.copyInputToDevice();
-  bool status = context1_->executeV2(buffers1.getDeviceBindings().data());
+  buffers1.setTensorAddresses(context1_.get());
+  cudaStream_t stream1;
+  cudaStreamCreate(&stream1);
+  bool status = context1_->enqueueV3(stream1);
+  cudaStreamSynchronize(stream1);
+  cudaStreamDestroy(stream1);
   if (!status) {
     return false;
   }

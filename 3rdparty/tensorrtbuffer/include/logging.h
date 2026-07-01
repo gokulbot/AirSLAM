@@ -18,8 +18,7 @@
 #ifndef TENSORRT_LOGGING_H
 #define TENSORRT_LOGGING_H
 
-#include "NvInferRuntimeCommon.h"
-#include "sample_options.h"
+#include "NvInferRuntime.h"  // TRT 10: ILogger/Severity moved here from NvInferRuntimeCommon.h
 #include <cassert>
 #include <ctime>
 #include <iomanip>

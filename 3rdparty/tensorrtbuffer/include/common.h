@@ -31,7 +31,6 @@
 #include "NvInfer.h"
 #include "NvInferPlugin.h"
 #include "logger.h"
-#include "sample_entrypoints.h"
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -1016,7 +1015,7 @@ namespace tensorrt_buffer
 
     inline bool isDataTypeSupported(nvinfer1::DataType dataType)
     {
-        auto builder = TensorRTUniquePtr<nvinfer1::IBuilder>(createBuilder());
+        auto builder = TensorRTUniquePtr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(tensorrt_log::gLogger.getTRTLogger()));
         if (!builder)
         {
             return false;
@@ -1168,7 +1167,7 @@ namespace tensorrt_buffer
     inline void updateTimingCacheFile(std::string const& fileName, nvinfer1::ITimingCache const* timingCache)
     {
         // Prepare empty timingCache in case that there is no existing file to read
-        std::unique_ptr<nvinfer1::IBuilder> builder{createBuilder()};
+        std::unique_ptr<nvinfer1::IBuilder> builder{nvinfer1::createInferBuilder(tensorrt_log::gLogger.getTRTLogger())};
         std::unique_ptr<nvinfer1::IBuilderConfig> config{builder->createBuilderConfig()};
         std::unique_ptr<nvinfer1::ITimingCache> fileTimingCache{
                 config->createTimingCache(static_cast<const void*>(nullptr), 0)};

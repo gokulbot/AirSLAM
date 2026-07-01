@@ -16,7 +16,9 @@ include_directories(
 
 set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
 
-add_library(tensorrtbuffer SHARED src/logger.cpp src/sample_options.cpp src/sample_utils.cpp)
+# sample_options.cpp / sample_utils.cpp were vendored trtexec helpers that pull in
+# NvCaffeParser.h (removed in TensorRT 10) and are unused by AirSLAM — dropped.
+add_library(tensorrtbuffer SHARED src/logger.cpp)
 
 
 

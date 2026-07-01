@@ -5,6 +5,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_BUILD_TYPE "release")
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 add_definitions(-w)
+# Use g2o's bundled Ceres headers: g2o builds with G2O_USE_VENDORED_CERES=ON but does
+# not export the macro, so consumers fall back to system Ceres (1.14, whose FixedArray
+# lacks fill()/data()). Define it here so g2o headers use the compatible bundled version.
+add_definitions(-DG2O_USE_VENDORED_CERES)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/3rdparty/tensorrtbuffer)
 add_subdirectory(${PROJECT_SOURCE_DIR}/3rdparty/DBoW2)
