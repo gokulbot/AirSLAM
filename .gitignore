@@ -12,4 +12,5 @@ model/*
 weights/*
 debug/*
 *.so
-*/__pycache__/*
+*/__pycache__/*output/orig_onnx/
+output/*.engine
