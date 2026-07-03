@@ -36,6 +36,34 @@ Takeaways:
   runs ViT-G on the Blackwell GPU (sm_120). Descriptors/plots live in `dino-exp/`
   (outside the repo).
 
+## Result 4 (DECISIVE) — DBoW2 vs AnyLoc under day->night (Gardens Point Walking)
+
+`demo/dump_bow_images.cpp` runs AirSLAM SuperPoint+DBoW2 on two image folders and
+dumps the cross BoW-similarity matrix; `gp_compare.py` scores it vs AnyLoc.
+day_right (map) vs night_right (query), 200 frame-aligned pairs, GT = |frame|<=3.
+
+| method | R@1 | R@10 | maxF1 |
+|---|---|---|---|
+| **DBoW2 (AirSLAM)** | 0.335 | 0.760 | 0.342 |
+| tiny-image | 0.035 | 0.250 | 0.042 |
+| DINOv2 cls / mean | 0.830 / 0.925 | 1.000 | 0.83 / 0.925 |
+| **AnyLoc (ViT-G VLAD)** | **0.990** | 1.000 | **0.990** |
+
+### The Phase-1 verdict (Results 3 + 4 together)
+
+| method | clean loops (MH_04) | day->night (Gardens Point) |
+|---|---|---|
+| DBoW2   | **0.86** R@1 | 0.34 R@1 |
+| AnyLoc  | 0.77 R@1 | **0.99** R@1 |
+
+**It's a trade, and the crossover is illumination.** DBoW2 (local SuperPoint-BoW)
+wins on same-condition loops; under day->night it collapses (0.86->0.34) while
+AnyLoc holds (0.99). Since AirSLAM's whole pitch is *illumination-robust* SLAM,
+the cross-condition regime is exactly its target -> **DINO/AnyLoc is justified for
+cross-session / relocalization under lighting change, NOT as a blanket DBoW2
+replacement.** Natural design: keep DBoW2 for same-session loops, add DINO for
+cross-condition relocalization (or a hybrid score).
+
 ## Result 3 — DBoW2 (AirSLAM's actual) vs DINO/AnyLoc, MH_04 (174 keyframes, 51 loops)
 
 `demo/dump_bow.cpp` (via `dump_bow.launch`) dumps AirSLAM's DBoW2 (SuperPoint

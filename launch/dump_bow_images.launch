@@ -1,0 +1,14 @@
+<launch>
+  <arg name="model_dir" default="$(find air_slam)/output" />
+  <arg name="voc_path" default="$(find air_slam)/voc/point_voc_L4.bin" />
+  <arg name="map_dir" default="$(find air_slam)/datasets/gardenspoint/day_right" />
+  <arg name="query_dir" default="$(find air_slam)/datasets/gardenspoint/night_right" />
+  <arg name="out_path" default="/tmp/gp_dbow.txt" />
+  <node name="dump_bow_images" pkg="air_slam" type="dump_bow_images" output="screen">
+    <param name="model_dir" type="string" value="$(arg model_dir)" />
+    <param name="voc_path" type="string" value="$(arg voc_path)" />
+    <param name="map_dir" type="string" value="$(arg map_dir)" />
+    <param name="query_dir" type="string" value="$(arg query_dir)" />
+    <param name="out_path" type="string" value="$(arg out_path)" />
+  </node>
+</launch>
