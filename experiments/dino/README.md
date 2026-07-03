@@ -36,6 +36,28 @@ Takeaways:
   runs ViT-G on the Blackwell GPU (sm_120). Descriptors/plots live in `dino-exp/`
   (outside the repo).
 
+## Result 3 — DBoW2 (AirSLAM's actual) vs DINO/AnyLoc, MH_04 (174 keyframes, 51 loops)
+
+`demo/dump_bow.cpp` (via `dump_bow.launch`) dumps AirSLAM's DBoW2 (SuperPoint
+vocabulary) pairwise BoW-similarity matrix over a saved map's keyframes;
+`kf_manifest.py` attaches images+GT; `compare_dbow.py` scores both.
+
+| method | R@1 | R@10 | maxF1 |
+|---|---|---|---|
+| **DBoW2 (AirSLAM)** | **0.863** | 1.000 | **0.831** |
+| AnyLoc (ViT-G VLAD, res 224) | 0.765 | 0.980 | 0.787 |
+| AnyLoc (ViT-G VLAD, res 448) | 0.765 | 0.941 | 0.783 |
+| DINOv2 mean / cls | 0.745 / 0.686-0.725 | | 0.69-0.72 / 0.64-0.67 |
+| tiny-image | 0.451 | 0.647 | 0.387 |
+
+**DBoW2 BEATS AnyLoc on clean single-session loops** (~10% higher R@1 and maxF1),
+robustly across resolution. This is the expected VPR result: local SuperPoint-BoW
+is very precise under consistent appearance; holistic foundation descriptors win
+only under *appearance change*. **Consequence: DINO/AnyLoc is not a free upgrade —
+it REGRESSES easy-case loop closure. The entire case for replacing DBoW2 rests on
+the appearance-change scenario**, which makes the day/night illumination test the
+decisive, make-or-break experiment for Phase 1.
+
 ## Result 2 — OpenLORIS office cross-session (map=office1-1, query=office1-N)
 
 Goal: test illumination/appearance robustness across sessions. **Finding: OpenLORIS

@@ -76,6 +76,10 @@ public:
   void StopVisualization();
   void Wait(int breakpoint);
 
+  // accessors (for the dump_bow tool)
+  MapPtr GetMap() { return _map; }
+  DatabasePtr GetDatabase() { return _database; }
+
 private:
   // tmp
   double odometry_length;

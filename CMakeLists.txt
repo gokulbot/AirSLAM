@@ -112,6 +112,9 @@ target_link_libraries(visual_odometry ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
 add_executable(map_refinement demo/map_refinement.cpp)
 target_link_libraries(map_refinement ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
 
+add_executable(dump_bow demo/dump_bow.cpp)
+target_link_libraries(dump_bow ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
+
 add_executable(relocalization demo/relocalization.cpp)
 target_link_libraries(relocalization ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
 
