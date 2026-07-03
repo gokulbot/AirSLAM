@@ -36,6 +36,28 @@ Takeaways:
   runs ViT-G on the Blackwell GPU (sm_120). Descriptors/plots live in `dino-exp/`
   (outside the repo).
 
+## Result 2 — OpenLORIS office cross-session (map=office1-1, query=office1-N)
+
+Goal: test illumination/appearance robustness across sessions. **Finding: OpenLORIS
+office is the wrong vehicle for this** — the cross-session variation is viewpoint +
+dynamic objects, not illumination, and the room is a tiny 3.6x1.5m.
+
+Using GT *only* (no compute), heading difference at matched positions vs office1-1:
+`office1-2/4/7 ~167deg (opposite)`, `office1-5 143deg`, `office1-3 61deg`,
+`office1-6 4deg (co-directional)`. So the pairs are either:
+- **opposite-heading** (1-2): appearance VPR is *impossible* (can't recognize a
+  place seen from behind) — all methods ~0.04 R@1, incl. AnyLoc. A real viewpoint
+  limit; this is why AirSLAM does geometric verification + a loop-distance gate.
+- **co-directional, same lighting** (1-6): near-duplicate frames → *trivial*, all
+  methods (incl. tiny-image) hit R@1=1.0, even under gamma-2.5 query darkening
+  (gamma is monotonic; the near-duplicate dominates).
+
+office1-1..1-7 all share global lighting (mean brightness 73/255), so no pair
+isolates illumination. **Conclusion: a clean illumination test needs a day/night
+or seasonal VPR benchmark** (SVOX, Nordland, Oxford RobotCar, Tokyo 24/7), where
+the same route is traversed under genuinely different conditions with no near-dups.
+
 ## TODO
-- Baseline vs **actual DBoW2** (instrument AirSLAM or reimplement) — the real comparison.
-- **Cross-session** test (OpenLORIS office1-1 vs 1-2, or day/night) — where AnyLoc should win big.
+- Illumination robustness on a real **day/night VPR benchmark** (SVOX/Nordland).
+- Baseline vs **actual DBoW2** (instrument AirSLAM) — the real "replace it?" number.
+- Moderate viewpoint-change pair (office1-3 @ 61deg) — the interesting middle ground.
