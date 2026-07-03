@@ -59,12 +59,16 @@ int main(int argc, char **argv) {
   map_refiner.UpdateCovisibilityGraph();
   std::cout << "Done." << std::endl;
 
+  // Save the refined (global-BA) trajectory BEFORE building the junction
+  // database: BuildJunctionDatabase only feeds relocalization and does not
+  // change poses, and it can stall on some inputs (e.g. fisheye) - saving here
+  // guarantees the refined trajectory regardless.
+  std::string trajectory_global_ba_path = ConcatenateFolderAndFileName(map_root, "trajectory_v1.txt");
+  map_refiner.SaveTrajectory(trajectory_global_ba_path);
+
   std::cout << "Build junction database..." << std::endl;
   map_refiner.BuildJunctionDatabase();
   std::cout << "Done." << std::endl;
-
-  std::string trajectory_global_ba_path = ConcatenateFolderAndFileName(map_root, "trajectory_v1.txt");
-  map_refiner.SaveTrajectory(trajectory_global_ba_path);
 
   map_refiner.Wait(breakpoint);
 
