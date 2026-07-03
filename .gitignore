@@ -12,5 +12,10 @@ model/*
 weights/*
 debug/*
 *.so
-*/__pycache__/*output/orig_onnx/
+*/__pycache__/*
+output/orig_onnx/
 output/*.engine
+
+# model_export (PLNet source): keep code + weights, drop paper figures / caches
+model_export/PLNet/docs/figures/
+**/__pycache__/
