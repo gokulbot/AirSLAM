@@ -14,7 +14,7 @@ max_y_diff: 2
 # Calibration
 distortion_type: 2  # 0 undistorted, 1 radial-tangential, 2 equidistant/fisheye (Kannala-Brandt): [k1,k2,k3,k4,0]
 cam0:
-  intrinsics: [284.98089599609375, 425.2443847656250, 286.10238647460938, 398.46759033203125] # fx, fy, cx, cy
+  intrinsics: [284.98089599609375, 286.10238647460938, 425.2443847656250, 398.46759033203125] # fx, fy, cx, cy  (sensors.yaml stores [fx,cx,fy,cy])
   distortion_coeffs: [-7.3047108016908169e-03, 4.3499931693077087e-02, -4.1283041238784790e-02, 7.6524601317942142e-03, 0]
   T_type: 0           # 0 => T is Tbc (camera pose in body/IMU frame)
   T:  # IMU -> fisheye1
@@ -23,7 +23,7 @@ cam0:
   - [1.1089910930e-02, 2.7492007439e-03, 9.9993472576e-01, -1.1866200220e-04]
   - [0.0, 0.0, 0.0, 1.0]
 cam1:
-  intrinsics: [284.81259155273438, 427.6615905761719, 285.97601318359375, 397.12341308593750]
+  intrinsics: [284.81259155273438, 285.97601318359375, 427.6615905761719, 397.12341308593750] # fx, fy, cx, cy  (sensors.yaml stores [fx,cx,fy,cy])
   distortion_coeffs: [-6.3794981688261032e-03, 4.1455611586570740e-02, -3.9464488625526428e-02, 6.9808149710297585e-03, 0]
   T_type: 0
   T:  # IMU -> fisheye2
