@@ -1,0 +1,33 @@
+%YAML:1.0
+# OpenLORIS-Scene, RealSense T265 dual-fisheye stereo (cam0=fisheye1, cam1=fisheye2).
+# Values from the per-sequence sensors.yaml / trans_matrix.yaml.
+# Run VO-only (body frame := fisheye1, so cam0 extrinsic is identity).
+
+image_height: 800
+image_width: 848
+use_imu: 0
+
+depth_lower_thr: 0.1
+depth_upper_thr: 10.0
+max_y_diff: 2
+
+# Calibration
+distortion_type: 2  # 0 undistorted, 1 radial-tangential, 2 equidistant/fisheye (Kannala-Brandt): [k1,k2,k3,k4,0]
+cam0:
+  intrinsics: [284.98089599609375, 425.2443847656250, 286.10238647460938, 398.46759033203125] # fx, fy, cx, cy
+  distortion_coeffs: [-7.3047108016908169e-03, 4.3499931693077087e-02, -4.1283041238784790e-02, 7.6524601317942142e-03, 0]
+  T_type: 0           # 0 => T is Tbc (camera pose in body frame), Euroc format
+  T:
+  - [1.0, 0.0, 0.0, 0.0]
+  - [0.0, 1.0, 0.0, 0.0]
+  - [0.0, 0.0, 1.0, 0.0]
+  - [0.0, 0.0, 0.0, 1.0]
+cam1:
+  intrinsics: [284.81259155273438, 427.6615905761719, 285.97601318359375, 397.12341308593750]
+  distortion_coeffs: [-6.3794981688261032e-03, 4.1455611586570740e-02, -3.9464488625526428e-02, 6.9808149710297585e-03, 0]
+  T_type: 0
+  T:  # fisheye2 pose in fisheye1 frame (from trans_matrix.yaml), baseline ~64 mm
+  - [9.9997103351978955e-01, -3.0859078732664710e-03, 6.9576787768359741e-03, 6.3976511359200003e-02]
+  - [3.1121161181976121e-03, 9.9998809175217129e-01, -3.7591338254934705e-03, 1.4826713595499999e-04]
+  - [-6.9459955824040347e-03, 3.7806780408845384e-03, 9.9996872932053249e-01, -3.9846837171399999e-04]
+  - [0.0, 0.0, 0.0, 1.0]
