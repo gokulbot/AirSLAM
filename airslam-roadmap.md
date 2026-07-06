@@ -7,16 +7,17 @@
 ## Vision
 
 Take **AirSLAM** (illumination-robust point-line visual SLAM) and grow it into a
-**semantic, foundation-model-powered SLAM system on a from-scratch incremental factor-graph backend.**
-The factor-graph optimizer is **built from scratch** — a custom GTSAM-like library with my own iSAM2,
-multi-hypothesis (MH-iSAM2), and CUDA acceleration — a first-class deliverable, not just a dependency.
+**semantic, foundation-model-powered SLAM system on a GTSAM incremental factor-graph backend.**
+The backend is **GTSAM, extended where it counts** — custom **semantic factors** and a **multi-hypothesis
+(MH-iSAM2) layer** built on GTSAM's iSAM2 — *not* a from-scratch clone. Effort goes into what doesn't exist
+yet (semantics + MHT), not into re-deriving what GTSAM already does well.
 The pieces are not separate hacks — they converge on one architecture and each phase de-risks the next.
 
 ## Tempo & depth (no deadline)
 
 Time is not a constraint — so optimize for **understanding, not delivery speed**. That flips several defaults:
-- **From-scratch *is* the system now.** The optimizer is no longer a throwaway warm-up before reaching for GTSAM — it's the real backend (Phases 3/4/7/8 build it: pose-graph solver → own iSAM2 → MHT → CUDA). GTSAM flips from "the library you adopt" to "the oracle you diff against." Theseus stays a throughput-proof prototype before the CUDA path. The from-scratch implementations are the point — and now they ship.
-- **The "optional deep-dives" become first-class**, not optional: roll-your-own iSAM2 (Phase 4), CUDA from scratch (Phase 8), implementing VLAD/metric-learning by hand (Phases 1–2).
+- **Understanding, not reinvention.** I already understand batch factor-graph optimization (L0–L2); the gap to close is *incremental smoothing (iSAM2)*. So understand iSAM2 by reading Kaess + studying GTSAM's `ISAM2` source and re-expressing AirSLAM's factors in GTSAM (Phases 3–4) — not by retyping a GTSAM clone. GTSAM is the backend and oracle both.
+- **The real from-scratch work is the *extensions***, and they're first-class: **semantic factors** (Phase 6) and the **MH-iSAM2 multi-hypothesis layer** on GTSAM's iSAM2 (Phase 7) — plus implementing VLAD/metric-learning by hand (Phases 1–2). CUDA (Phase 8) is optional and out of the critical path.
 - **Read the papers fully**, reproduce a key figure from each before building on it.
 - **Write up each phase** (blog/notes) — teaching it back is the deepest test of understanding.
 - Still ship per-phase milestones — depth-first ≠ never-finishing. Each phase ends with a working system + a writeup.
@@ -54,16 +55,16 @@ Time is not a constraint — so optimize for **understanding, not delivery speed
          └──────┬──────┴──────────────────┬──────────────┘
                 ▼                          ▼
  ┌──────────────────────────────────────────────────────────────┐
- │       FACTOR GRAPH  —  YOUR OWN GTSAM-LIKE LIBRARY             │
- │   L0 manifolds · L1 factors · L2 Levenberg–Marquardt           │
- │   L3 Bayes tree · L4 iSAM2 incremental        (CPU, sequential)│ ◀── loop candidates
- │   L5 robust factors + multi-hypothesis (MH-iSAM2)             │      (ambiguous → hypotheses;
- │   L6 CUDA: batched BA / hypothesis evaluation     (GPU)       │       semantics PRUNE them)
+ │       FACTOR GRAPH  —  GTSAM  (+ your extensions)             │
+ │   GTSAM: factors · LM · Bayes tree · iSAM2  (CPU, sequential)  │ ◀── loop candidates
+ │   YOUR: semantic factors (Phase 6)                            │      (ambiguous → hypotheses;
+ │   YOUR: MH-iSAM2 multi-hypothesis layer (Phase 7)            │       semantics PRUNE them)
+ │   [optional] CUDA batched BA / hyp-eval (Phase 8)            │
  └───────────────────────┬──────────────────────────▲───────────┘
                          │                           │
               trajectory + semantic map    ┌──────────┴─────────────┐
                          │                 │ LOOP CLOSURE / RELOC    │
-                         ▼                 │ DINOv2/AnyLoc global     │ ← replaces DBoW2
+                         ▼                 │ DINOv2/AnyLoc global     │ ← DINO for cross-
               ┌────────────────────┐       │ descriptors → ANN(FAISS) │
               │ offline map refine │       │  + geometric verify      │
               │   → reusable map   │       └─────────────────────────┘
@@ -78,36 +79,23 @@ Time is not a constraint — so optimize for **understanding, not delivery speed
 
 > This is the north-star **target**. Everything upstream of the FACTOR GRAPH is provisional until **Phase 5** measures whether one representation can serve both fine geometry and coarse semantics (unified net vs. split backbones).
 
-## Why build the optimizer instead of using GTSAM
+## Why extend GTSAM instead of rebuilding it
 
-Phases 3/4/7/8 are no longer "adopt GTSAM/iSAM2/MH-iSAM2/Theseus" — they are **build my own GTSAM-like
-optimization library** from scratch. This is the roadmap's from-scratch ethos promoted from throwaway-toy
-to the real backend. **Stock GTSAM stays in the project as a numerical *oracle*** — every layer is diffed
-against it on the same graph, preserving the "regression eval after every phase" rule.
+Earlier drafts built a from-scratch GTSAM clone (Phases 3/4/7/8). **Reconsidered and dropped.** I already
+understand batch factor-graph optimization (L0–L2), so retyping it as a clone adds nothing; the real gap is
+**incremental smoothing (iSAM2)**, and the real *new* work is **semantic factors** and **multi-hypothesis** —
+neither of which is a from-scratch-optimizer problem:
 
-**Everything is built inside the AirSLAM fork — one repo.** The optimizer is an in-tree module (e.g. an
-`optimizer/` directory) of the AirSLAM fork, not a separate project; the whole system stays a single
-buildable tree. Keep it cleanly separable (its own headers/lib target) so it *could* be extracted later,
-but all edits land in the AirSLAM repo.
+- **Semantic factors are just new factor *types*.** Subclass a GTSAM factor, implement `evaluateError()` (residual + Jacobian) — this is what GTSAM is *for*. You don't own the machinery to add a factor. → **Phase 6**
+- **MHT is *not* a factor — it's solver surgery.** Multi-hypothesis lives inside the Bayes-tree elimination (MH-iSAM2's "hypo-tree"); you extend GTSAM's iSAM2, you don't add an edge. This is the one genuinely deep piece — and it *requires* understanding incremental smoothing (the gap above), which is why closing that gap is a prerequisite, not a clone. → **Phase 7**
 
-**Library build order (maps onto the phases):**
-- **L0 — Manifold/Lie types:** SO(3), SE(3) (+ maybe Sim(3)); exp/log, retract/localCoordinates, adjoints. Build a numerical-Jacobian checker first — most bugs live here.
-- **L1 — Graph core:** `Key→Values`; `Factor` base with `error()` + `linearize()`; noise models (whiten by √information) + robust kernels; concrete factors (prior, between, stereo reprojection, **line reprojection**).
-- **L2 — Batch solve:** linearize → sparse `AᵀA x = Aᵀb`; sparse Cholesky; Gauss-Newton → Levenberg-Marquardt.  → **Phase 3**
-- **L3 — Elimination / Bayes tree:** variable ordering (COLAMD), symbolic elimination, clique tree.
-- **L4 — iSAM2:** fluid relinearization + partial re-elimination.  → **Phase 4**
-- **L5 — Robust + multi-hypothesis:** max-mixtures / switchable-constraints / GNC, then the MH-iSAM2 "hypo-tree" (shared subtrees across hypotheses).  → **Phase 7**
-- **L6 — CUDA:** batched dense blocks, Schur complement, matrix-free PCG, batched hypothesis evaluation.  → **Phase 8**
+**GTSAM is the backend.** AirSLAM currently uses **g2o**, so the first backend task is a **g2o → GTSAM migration** (re-express point + line reprojection factors, hit ATE parity) — which is also *how* the factor graph is understood: by re-expressing it, not rebuilding it. Incremental smoothing is understood by reading Kaess iSAM2 + studying/using GTSAM's `ISAM2`, not reimplementing it. GTSAM doubles as the numerical **oracle** (regression-diff every phase). Everything stays inside the AirSLAM fork; the custom pieces (semantic factors, MHT layer) are in-tree, cleanly-separable modules.
 
-**Design decisions that bite early (lock these at L1):**
-- **Struct-of-Arrays factor storage, not virtual/pointer-chasing OOP** — a GTSAM-style `virtual linearize()` graph cannot be batched on a GPU; all same-type factors must sit in flat SoA arrays so one kernel evaluates thousands. Retrofitting later = a rewrite.
-- **Two solve paths behind one interface:** sequential Bayes-tree solver (CPU, L4) and batched dense/Schur solver (GPU, L6) both plug in. iSAM2 stays CPU/sequential; MHT is the workload that justifies the GPU path — which is *why* CUDA and MHT share a design.
-- **Analytic Jacobians, with a numeric-diff fallback for tests.**
+**The one thing that would flip this back: CUDA.** GPU batching needs Struct-of-Arrays factor storage that GTSAM's OOP/virtual factors can't provide — so *if* speed demands it, CUDA forces owning the factor layout, as a **separate batched-BA / batched-hypothesis track** (not a GTSAM extension). It only accelerates the *batchable* numerics (parallel BA, evaluating many MHT hypotheses at once), never sequential iSAM2. Currently **optional / out of the critical path** (Phase 8) — reach for it when a real bottleneck (esp. many-hypothesis MHT) demands it, not by default.
 
-**Open forks (decide before cutting code):**
-- *Replace vs alongside* — own lib becomes the backend (GTSAM = oracle only), or runs as a parallel track while GTSAM ships. *Lean: replace once L2 hits parity.*
-- *Eigen vs fully-from-scratch linear algebra* — build on Eigen (dense + sparse Cholesky) and spend from-scratch energy on the manifold/graph/elimination layers, or hand-roll the sparse LA too. *Lean: Eigen (fully-scratch ~3× the timeline).*
-- *Full API mirror vs AirSLAM-subset.* *Lean: subset, but mirror naming so GTSAM examples translate.*
+**Open decisions:**
+- *Migrate vs alongside* — swap AirSLAM's backend to GTSAM outright, or run GTSAM beside g2o during the transition. *Lean: migrate once point/line factors hit parity.*
+- *iSAM2 flavor for MHT* — incremental MH-iSAM2 (extend GTSAM's iSAM2, CPU) vs a lighter batched/pruned scheme (GPU-friendly). *Decide at Phase 7 with the workload in hand.*
 
 ---
 
@@ -120,13 +108,13 @@ but all edits land in the AirSLAM repo.
 - **Done when:** you can reproduce baseline ATE on ≥2 datasets and have a one-command eval script.
 - **Effort:** ~1 week (mostly build/deps pain).
 
-### Phase 1 — DINO loop closure *(the quick win that becomes the testbed)*
-- **Goal:** Replace DBoW2 place-recognition (stage-1 retrieval) with DINOv2/AnyLoc global descriptors. Keep LightGlue geometric verification + backend.
-- **Do:** prototype in **Python first** (compute AnyLoc descriptors for keyframes, compare retrieval vs logged DBoW2 candidates); then wire into C++ (DINOv2 ONNX→TensorRT engine, store descriptor per keyframe).
+### Phase 1 — DINO relocalization *(the quick win that became the testbed)*
+- **Goal:** DINOv2/AnyLoc global descriptors for **cross-condition relocalization** — *not* a blanket DBoW2 replacement. (Finding: DBoW2 wins clean same-session loops; DINO/AnyLoc dominates day↔night. So DINO owns the illumination-change / reloc case; DBoW2 keeps same-session loops.)
+- **Do:** ✅ **Python prototype done** — AnyLoc (ViT-G, value-facet, VLAD) vs AirSLAM's *actual* DBoW2 (`dump_bow` tools): clean loops DBoW2 0.86 > AnyLoc 0.77; Gardens Point day→night AnyLoc **0.99** ≫ DBoW2 0.34. **Next:** wire into C++ (DINOv2 ViT-S/B → ONNX→TensorRT engine, per-keyframe descriptor stored in the map, retrieval in the **relocalization** stage + geometric verify).
 - **Learn:** VPR, VLAD aggregation, foundation-model features, ANN retrieval (FAISS).
 - **Read:** AnyLoc; SALAD; "Loop Closure using AnyLoc VPR in DPV-SLAM" (arXiv 2601.02723).
-- **Done when:** Recall@K and loop precision-recall beat DBoW2 on a day↔night / lighting-change sequence; ATE improves or holds.
-- **Effort:** weekend (Python compare) → 1–2 weeks (full C++).
+- **Done when:** cross-condition reloc success beats DBoW2 on a day↔night / lighting-change sequence; ATE holds. *(Python retrieval bar already met.)*
+- **Effort:** weekend (Python compare ✅) → 1–2 weeks (full C++).
 
 ### Phase 2 — Fine-tune DINOv2 for VPR *(the ML-skills detour)*
 - **Goal:** Learn fine-tuning itself, using Phase 1 as the testbed.
@@ -136,20 +124,21 @@ but all edits land in the AirSLAM repo.
 - **Done when:** fine-tuned ViT-S/B improves day-night Recall@5 vs frozen on Tokyo 24/7 / SVOX; dropped back into Phase-1 retrieval.
 - **Effort:** 1–2 weeks.
 
-### Phase 3 — Own batch optimizer (L0–L2) *(build the optimizer)*
-- **Goal:** Build my own factor-graph library (manifolds → factors → Levenberg-Marquardt batch solve) and match stock AirSLAM accuracy. GTSAM kept as numerical oracle, not backend.
-- **Do:** implement L0 manifolds (+ numeric-Jacobian checker) → L1 graph core with stereo point + line reprojection factors → L2 sparse-Cholesky LM; re-express AirSLAM's pose-graph/BA in it; diff every result against GTSAM on the same graph.
-- **Learn:** factor graphs, the SAM formulation, custom factors, SE(3) Jacobians, sparse linear solves.
-- **Read:** Dellaert "Factor Graphs for Robot Perception"; GTSAM source (as reference + oracle).
-- **Done when:** my library's ATE is within noise of stock AirSLAM (and of GTSAM) on all eval sequences.
-- **Effort:** 4–8 weeks (building, not adopting).
+### Phase 3 — Migrate backend g2o → GTSAM *(adopt, don't rebuild)*
+- **Goal:** Move AirSLAM's optimization from **g2o** to **GTSAM** and hit ATE parity. Understand the factor graph by *re-expressing* AirSLAM's factors in GTSAM, not by cloning it.
+- **Do:** re-express stereo point + line reprojection (and pose-graph/BA) as GTSAM factors; swap the backend; diff ATE against the stock g2o build on every eval sequence. GTSAM stays in as the numerical oracle.
+- **Learn:** factor graphs, the SAM formulation, GTSAM's Factor/Values/graph API, custom factors, SE(3) Jacobians.
+- **Read:** Dellaert "Factor Graphs for Robot Perception"; GTSAM examples + custom-factor docs.
+- **Done when:** the GTSAM-backed build's ATE is within noise of stock AirSLAM on all eval sequences.
+- **Effort:** 2–4 weeks (migration + parity, not from-scratch).
 
-### Phase 4 — Own iSAM2 incremental (L3–L4)
-- **Goal:** Add incremental smoothing to my library: variable elimination → Bayes tree (L3) → iSAM2 fluid relinearization + partial re-elimination (L4).
-- **Learn:** incremental inference, the Bayes tree, variable ordering, fluid relinearization.
-- **Read:** Kaess et al. iSAM2 (IJRR 2012); GTSAM's ISAM2 implementation as oracle.
-- **Done when:** my incremental backend matches my own batch accuracy (and GTSAM's iSAM2) at lower per-step latency.
-- **Effort:** 4–6 weeks (the hard, clever core — no longer "free from GTSAM").
+### Phase 4 — Master GTSAM's iSAM2 *(close the incremental-smoothing gap)*
+- **Goal:** Close the one real knowledge gap — *incremental smoothing* — by reading, using, and dissecting GTSAM's iSAM2, not reimplementing it. This is the prerequisite for the MHT extension (Phase 7).
+- **Do:** switch the Phase-3 backend to `ISAM2`; understand variable elimination → Bayes tree → fluid relinearization + partial re-elimination by tracing GTSAM's implementation and instrumenting it; confirm lower per-step latency vs batch.
+- **Learn:** incremental inference, the Bayes tree, variable ordering, fluid relinearization — deeply enough to *modify* it in Phase 7.
+- **Read:** Kaess et al. iSAM2 (IJRR 2012); GTSAM's `ISAM2` source (read to modify, not to copy).
+- **Done when:** the incremental backend matches batch accuracy at lower per-step latency, and I can trace/explain every step of a Bayes-tree update.
+- **Effort:** 2–4 weeks (reading + using the hard core, not rebuilding it).
 
 ### Phase 5 — Semantic head (SAM-distilled) *(frozen-backbone MVP first)*
 - **Goal:** Get per-pixel semantics into the system cheaply, real-time.
@@ -167,20 +156,20 @@ but all edits land in the AirSLAM repo.
 - **Done when:** ATE improves in dynamic-scene sequences (TUM/Bonn dynamic) vs the geometric-only system.
 - **Effort:** 3–5 weeks.
 
-### Phase 7 — Own robust + multi-hypothesis (L5)
-- **Goal:** Add robustness and multi-hypothesis to my library: keep multiple ambiguous loop/association hypotheses; let optimization + semantics resolve them.
-- **Do:** robust factors first (max-mixtures / switchable constraints / GNC) → then the MH-iSAM2 "hypo-tree" (shared subtrees across hypotheses) for multi-hypothesis data association; semantics prune hypotheses.
-- **Read:** Olson & Agarwal max-mixtures; Sünderhauf switchable constraints; **MH-iSAM2 (Hsiao & Kaess 2019)** — the unifying reference (and the structure to reimplement).
+### Phase 7 — MHT on GTSAM's iSAM2 *(the deep, novel contribution)*
+- **Goal:** Add robustness + multi-hypothesis *on top of GTSAM's iSAM2*: keep multiple ambiguous loop/association hypotheses; let optimization + semantics resolve them. The one genuinely from-scratch backend piece — solver surgery, not a factor.
+- **Do:** robust factors first (max-mixtures / switchable constraints / GNC — these *are* just factors) → then the **MH-iSAM2 "hypo-tree"** (shared subtrees across hypotheses) built by extending GTSAM's `ISAM2` internals; semantics (Phase 6) prune hypotheses. The ambiguous cross-condition matches AnyLoc surfaces (Phase 1) are exactly what this resolves.
+- **Read:** Olson & Agarwal max-mixtures; Sünderhauf switchable constraints; **MH-iSAM2 (Hsiao & Kaess 2019)** — the reference structure to build on GTSAM.
 - **Done when:** robust to perceptual-aliasing loops that break the single-hypothesis backend.
-- **Effort:** 6–10 weeks (research-grade, and now self-implemented).
+- **Effort:** 6–10 weeks (research-grade — extending GTSAM's iSAM2, not from scratch).
 
-### Phase 8 — CUDA acceleration of my library (L6) *(the systems capstone)*
-- **Goal:** GPU-accelerate the **batchable** layer of my own lib — batched hypothesis evaluation / BA — NOT iSAM2 itself.
-- **Do:** prototype with **Theseus** (batched differentiable NLS on GPU) to prove the throughput win, then write the CUDA path against my L1 SoA factor layout: batched dense blocks → Schur complement → matrix-free PCG.
+### Phase 8 — CUDA acceleration *(optional / when a bottleneck demands it)*
+- **Goal:** GPU-accelerate the **batchable** numerics — batched hypothesis evaluation / BA — when the many-hypothesis MHT workload (Phase 7) becomes the bottleneck. NOT iSAM2 itself (sequential, stays CPU). Optional, off the critical path.
+- **Do:** prototype with **Theseus** (batched differentiable NLS on GPU) to prove the throughput win; if it pays off, write a CUDA batched-BA path against a **Struct-of-Arrays factor layout** — the *one* place that forces owning the factor storage (a separate track, not a GTSAM extension): batched dense blocks → Schur complement → matrix-free PCG.
 - **Learn:** GPU NLS, batched solves, Schur/matrix-free PCG, CUDA.
 - **Read:** PBA/Multicore BA (Wu 2011), MegBA, DeepLM, Theseus, Ceres-CUDA.
-- **Done when:** measurable speedup on the many-hypothesis workload vs my CPU path.
-- **Effort:** open-ended.
+- **Done when:** measurable speedup on the many-hypothesis workload vs the CPU path.
+- **Effort:** open-ended (only if pursued).
 
 ---
 
