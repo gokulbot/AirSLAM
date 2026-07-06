@@ -276,6 +276,11 @@ struct RelocalizationConfigs{
   OptimizationConfig pose_estimation_config;
   RosPublisherConfig ros_publisher_config;
 
+  int use_dino = 0;          // 1 -> DINOv2 cross-condition relocalization (else DBoW2)
+  int dino_topk = 10;        // # of nearest keyframes to hand to geometric verification
+  std::string dino_onnx;
+  std::string dino_engine;
+
   RelocalizationConfigs() {}
 
   RelocalizationConfigs(const std::string& config_file_, const std::string& model_dir_){
@@ -301,6 +306,11 @@ struct RelocalizationConfigs{
 
     pose_estimation_config.Load(file_node["pose_estimation"]);
     ros_publisher_config.Load(file_node["ros_publisher"]);
+
+    use_dino = file_node["use_dino"] ? file_node["use_dino"].as<int>() : 0;
+    dino_topk = file_node["dino_topk"] ? file_node["dino_topk"].as<int>() : 10;
+    dino_onnx = ConcatenateFolderAndFileName(model_dir, "dinov2_vits14.onnx");
+    dino_engine = ConcatenateFolderAndFileName(model_dir, "dinov2_vits14.engine");
   }
 };
 

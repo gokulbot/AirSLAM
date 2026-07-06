@@ -1,3 +1,5 @@
+use_dino: 1        # 1 -> DINOv2 cross-condition relocalization (else DBoW2)
+dino_topk: 10
 min_inlier_num: 45
 pose_refinement: 1 # if true, the localization will be more stable but slower. 
 

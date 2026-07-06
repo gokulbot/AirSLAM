@@ -34,6 +34,18 @@ MapUser::MapUser(RelocalizationConfigs& configs, ros::NodeHandle nh): _configs(c
   _ros_publisher = std::shared_ptr<RosPublisher>(new RosPublisher(_configs.ros_publisher_config, nh));
 
   _reloc_message = std::shared_ptr<RelocMessage>(new RelocMessage);
+
+  _use_dino = _configs.use_dino;
+  _dino_topk = _configs.dino_topk;
+  if(_use_dino){
+    _dino_extractor = std::shared_ptr<DinoExtractor>(new DinoExtractor(_configs.dino_onnx, _configs.dino_engine));
+    if(!_dino_extractor->build()){
+      std::cout << "DINO extractor build FAILED; falling back to DBoW2 relocalization" << std::endl;
+      _use_dino = false;
+    }else{
+      std::cout << "DINO relocalization ENABLED (topk=" << _dino_topk << ")" << std::endl;
+    }
+  }
 }
 
 void MapUser::PubMap(){
@@ -132,37 +144,47 @@ bool MapUser::Relocalization(cv::Mat& image, Eigen::Matrix4d& pose){
   _database->FrameToBow(features, word_features, bow_vector, word_of_features);
   _junction_database->FrameToBow(junctions, junction_word_features, junction_bow_vector, junction_word_of_features);
 
-  // query
-  std::map<FramePtr, int> frame_sharing_words;
-  _database->Query(bow_vector, frame_sharing_words);
-
-  if(frame_sharing_words.empty()) return false;
-
-  // filtration
-  int max_sharing_words = 0;
-  for(const auto& kv : frame_sharing_words){
-    max_sharing_words = kv.second > max_sharing_words ? kv.second : max_sharing_words;
-  }
-  int sharing_wrods_num_thr = std::max(static_cast<int>(max_sharing_words * 0.3f), 8);
-
-  std::map<FramePtr, int>::iterator fsw_it = frame_sharing_words.begin();
-  for(; fsw_it != frame_sharing_words.end();){
-    FramePtr fsw = fsw_it->first;
-    if(fsw_it->second < sharing_wrods_num_thr){
-      fsw_it = frame_sharing_words.erase(fsw_it);
-    }else{
-      fsw_it++;
-    }
-  }
-
-  if(frame_sharing_words.empty()) return false;
-
-  // scoring
+  // candidate selection -> frame_scores. DINO (cross-condition) or DBoW2 (default).
   std::map<FramePtr, double> frame_scores;
-  fsw_it = frame_sharing_words.begin();
-  for(; fsw_it != frame_sharing_words.end(); fsw_it++){
-    FramePtr fsw = fsw_it->first;
-    frame_scores[fsw] = _database->Score(_database->_frame_bow_vectors[fsw], bow_vector);
+  if(_use_dino && _dino_extractor){
+    // DINOv2 global-descriptor retrieval: cosine-rank map keyframes vs the query.
+    Eigen::VectorXf qdesc;
+    if(!_dino_extractor->infer(image, qdesc)) return false;   // raw image, matches how the map descriptors were built
+    std::vector<std::pair<double, FramePtr>> ranked;
+    for(auto& kv : _map->GetAllKeyframes()){
+      const Eigen::VectorXf& d = kv.second->GetDinoDescriptor();
+      if(d.size() == qdesc.size() && d.size() > 0){
+        ranked.emplace_back(static_cast<double>(qdesc.dot(d)), kv.second);   // both unit-norm -> cosine
+      }
+    }
+    if(ranked.empty()) return false;
+    size_t K = std::min(static_cast<size_t>(_dino_topk), ranked.size());
+    std::partial_sort(ranked.begin(), ranked.begin() + K, ranked.end(),
+        [](const std::pair<double, FramePtr>& a, const std::pair<double, FramePtr>& b){ return a.first > b.first; });
+    for(size_t i = 0; i < K; i++) frame_scores[ranked[i].second] = ranked[i].first;
+  }else{
+    // DBoW2 place recognition
+    std::map<FramePtr, int> frame_sharing_words;
+    _database->Query(bow_vector, frame_sharing_words);
+    if(frame_sharing_words.empty()) return false;
+
+    int max_sharing_words = 0;
+    for(const auto& kv : frame_sharing_words){
+      max_sharing_words = kv.second > max_sharing_words ? kv.second : max_sharing_words;
+    }
+    int sharing_wrods_num_thr = std::max(static_cast<int>(max_sharing_words * 0.3f), 8);
+    for(std::map<FramePtr, int>::iterator fsw_it = frame_sharing_words.begin(); fsw_it != frame_sharing_words.end();){
+      if(fsw_it->second < sharing_wrods_num_thr){
+        fsw_it = frame_sharing_words.erase(fsw_it);
+      }else{
+        fsw_it++;
+      }
+    }
+    if(frame_sharing_words.empty()) return false;
+
+    for(auto& kv : frame_sharing_words){
+      frame_scores[kv.first] = _database->Score(_database->_frame_bow_vectors[kv.first], bow_vector);
+    }
   }
 
   int print_debug_info = 0;

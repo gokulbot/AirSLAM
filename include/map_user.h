@@ -9,6 +9,7 @@
 #include "feature_detector.h"
 #include "super_glue.h"
 #include "read_configs.h"
+#include "dino_extractor.h"
 #include "imu.h"
 #include "dataset.h"
 #include "camera.h"
@@ -57,6 +58,9 @@ private:
   // for relocalization
   DatabasePtr _database;
   DatabasePtr _junction_database;
+  DinoExtractorPtr _dino_extractor;
+  bool _use_dino = false;
+  int _dino_topk = 10;
 
   // for visualization
   RosPublisherPtr _ros_publisher;
