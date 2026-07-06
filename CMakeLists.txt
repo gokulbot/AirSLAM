@@ -69,6 +69,8 @@ add_library(${PROJECT_NAME}_lib SHARED
   src/bow/FSuperpoint.cc
   src/bow/database.cc
   src/super_point.cpp
+  src/trt_module.cpp
+  src/dino_extractor.cpp
   src/feature_detector.cc
   src/super_glue.cpp
   src/light_glue.cpp
@@ -117,6 +119,9 @@ target_link_libraries(dump_bow ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
 
 add_executable(dump_bow_images demo/dump_bow_images.cpp)
 target_link_libraries(dump_bow_images ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
+
+add_executable(test_dino demo/test_dino.cpp)
+target_link_libraries(test_dino ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
 
 add_executable(relocalization demo/relocalization.cpp)
 target_link_libraries(relocalization ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
