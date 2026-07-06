@@ -54,7 +54,9 @@ int main(int argc, char** argv) {
       if (d < best_d) { best_d = d; best = static_cast<int>(i); }
     }
     if (best < 0 || best_d > 0.05) { ++skipped; continue; }
-    cv::Mat img = cv::imread(ConcatenateFolderAndFileName(img_dir, names[best]));
+    // grayscale to match relocalization.cpp query loading (cv::imread(...,0)) so map
+    // and query DINO descriptors use identical preprocessing (matters for color datasets)
+    cv::Mat img = cv::imread(ConcatenateFolderAndFileName(img_dir, names[best]), cv::IMREAD_GRAYSCALE);
     if (img.empty()) { ++skipped; continue; }
     Eigen::VectorXf desc;
     if (!dino.infer(img, desc)) { ++skipped; continue; }

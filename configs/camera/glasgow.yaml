@@ -1,0 +1,42 @@
+%YAML:1.0
+
+image_height: 720
+image_width: 1280
+use_imu: 0
+
+depth_lower_thr: 0.1
+depth_upper_thr: 20.0
+max_y_diff: 1
+
+# Calibration
+# Glasgow extreme-lighting SLAM dataset (joe3012, HuggingFace): rectified color stereo,
+# 1280x720. No calibration shipped -> estimated focal/baseline (validated + scale-corrected
+# via Sim(3) ATE against Vive ground truth). Recall comparison is calibration-independent.
+distortion_type: 0  # rectified inputs
+cam0:
+  intrinsics: [700.0, 700.0, 640.0, 360.0] # fx, fy, cx, cy
+  distortion_coeffs: [0.0, 0.0, 0.0, 0.0, 0]
+  T_type: 0
+  T:
+  - [1.0, 0.0, 0.0, 0.0]
+  - [0.0, 1.0, 0.0, 0.0]
+  - [0.0, 0.0, 1.0, 0.0]
+  - [0.0, 0.0, 0.0, 1.0]
+cam1:
+  intrinsics: [700.0, 700.0, 640.0, 360.0]
+  distortion_coeffs: [0.0, 0.0, 0.0, 0.0, 0]
+  T_type: 0
+  T:
+  - [1.0, 0.0, 0.0, 0.12]
+  - [0.0, 1.0, 0.0, 0.0]
+  - [0.0, 0.0, 1.0, 0.0]
+  - [0.0, 0.0, 0.0, 1.0]
+
+
+# IMU (unused, use_imu:0)
+rate_hz: 200
+gyroscope_noise_density: 1.0e-04
+gyroscope_random_walk: 1.0e-05
+accelerometer_noise_density: 1.0e-3
+accelerometer_random_walk: 1.0e-3
+g_value: 9.81
