@@ -630,4 +630,12 @@ void Frame::FindJunctionConnections(){
 
 const std::vector<std::set<int>>& Frame::GetJunctionConnections(){
   return _connected_junctions;
-} 
+}
+
+void Frame::SetDinoDescriptor(const Eigen::VectorXf& descriptor){
+  _dino_descriptor = descriptor;
+}
+
+const Eigen::VectorXf& Frame::GetDinoDescriptor() const{
+  return _dino_descriptor;
+}

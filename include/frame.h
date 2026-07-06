@@ -13,6 +13,8 @@
 #include <boost/serialization/set.hpp>
 #include <boost/serialization/vector.hpp>
 #include <boost/serialization/shared_ptr.hpp>
+#include <boost/serialization/version.hpp>
+#include <boost/serialization/array.hpp>
 
 #include "utils.h"
 #include "mappoint.h"
@@ -132,6 +134,10 @@ public:
   void FindJunctionConnections();
   const std::vector<std::set<int>>& GetJunctionConnections();
 
+  // DINOv2 global descriptor for cross-condition relocalization; empty until computed.
+  void SetDinoDescriptor(const Eigen::VectorXf& descriptor);
+  const Eigen::VectorXf& GetDinoDescriptor() const;
+
   
 public:
   int tracking_frame_id;
@@ -181,6 +187,14 @@ private:
 
     ar & _sentence_ids_of_word;
     ar & _sentences;
+
+    // v1+: DINOv2 global descriptor (dynamic-size vector -> serialize size then data)
+    if(version >= 1){
+      int dino_dim = static_cast<int>(_dino_descriptor.size());
+      ar & dino_dim;
+      if(Archive::is_loading::value) _dino_descriptor.resize(dino_dim);
+      if(dino_dim > 0) ar & boost::serialization::make_array(_dino_descriptor.data(), dino_dim);
+    }
   }
 
 private:
@@ -225,8 +239,13 @@ private:
   // for re-localization, word id <-> sentecnse indeces
   std::map<DBoW2::WordId, std::vector<int>> _sentence_ids_of_word;
   std::vector<std::vector<DBoW2::WordId>> _sentences;
+
+  // DINOv2 global descriptor for cross-condition relocalization (empty until computed)
+  Eigen::VectorXf _dino_descriptor;
 };
 
 typedef std::shared_ptr<Frame> FramePtr;
+
+BOOST_CLASS_VERSION(Frame, 1)
 
 #endif  // FRAME_H_
