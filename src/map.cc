@@ -846,6 +846,38 @@ void Map::LocalMapOptimization(FramePtr new_frame){
   if(!_camera->UseIMU() || IMUInit()){
     this->Publish(new_frame->GetTimestamp());
   }
+
+  // Live iSAM2 smoother (uncertainty-aware, opt-in via AIRSLAM_ISAM_SMOOTHER): feed this keyframe
+  // incrementally and read out its marginal covariance. Vision-only (stereo points) for now; the
+  // IMU/line factors are the VIO extension.
+  if(std::getenv("AIRSLAM_ISAM_SMOOTHER")){
+    Eigen::Matrix4d Tcb_m = _camera->BodyToCamera();
+    gtsam::Pose3 Tcb_p(gtsam::Rot3(Tcb_m.block<3,3>(0,0)), gtsam::Point3(Tcb_m.block<3,1>(0,3)));
+    if(!_isam_smoother){
+      _isam_smoother = std::make_shared<IsamSmoother>(Tcb_p.inverse(),
+          _camera->Fx(), _camera->Fy(), _camera->Cx(), _camera->Cy(), _camera->BF());
+    }
+    std::vector<StereoObservation> obs;
+    std::vector<MappointPtr>& fmpts = new_frame->GetAllMappoints();
+    for(size_t i = 0; i < fmpts.size(); i++){
+      MappointPtr mpt = fmpts[i];
+      if(!mpt || !mpt->IsValid()) continue;
+      Eigen::Vector3d kp;
+      if(!new_frame->GetKeypointPosition(i, kp) || kp(2) <= 0) continue;   // stereo observations only
+      obs.push_back({mpt->GetId(), mpt->GetPosition(), kp});
+    }
+    Eigen::Matrix4d Twc = new_frame->GetPose();
+    gtsam::Pose3 Twc_p(gtsam::Rot3(Twc.block<3,3>(0,0)), gtsam::Point3(Twc.block<3,1>(0,3)));
+    int kf_id = new_frame->GetFrameId();
+    bool anchor = (_isam_smoother->NumKeyframes() == 0);
+    _isam_smoother->AddKeyframe(kf_id, Twc_p * Tcb_p, anchor, obs);
+    if(kf_id % 20 == 0){   // build the whole line first so it doesn't interleave with the VO thread's stdout
+      std::string msg = "[iSAM2] kf " + std::to_string(kf_id) + " pos-sigma=" +
+          std::to_string(_isam_smoother->PositionSigma(kf_id) * 1000) + "mm (" +
+          std::to_string(_isam_smoother->NumKeyframes()) + " kfs)\n";
+      std::cout << msg;
+    }
+  }
 }
 
 std::pair<FramePtr, FramePtr> Map::MakeFramePair(FramePtr frame0, FramePtr frame1){

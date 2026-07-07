@@ -13,6 +13,7 @@
 #include "read_configs.h"
 #include "camera.h"
 #include "optimizer_backend.h"
+#include "isam_smoother.h"
 #include "mappoint.h"
 #include "mapline.h"
 #include "frame.h"
@@ -122,6 +123,7 @@ private:
   OptimizationConfig _backend_optimization_config;
   CameraPtr _camera;
   OptimizerBackendPtr _optimizer = MakeOptimizerBackend();   // swappable backend (AIRSLAM_BACKEND=g2o|gtsam)
+  IsamSmootherPtr _isam_smoother;   // live iSAM2 smoother, opt-in via AIRSLAM_ISAM_SMOOTHER (vision-only for now)
   std::map<int, MappointPtr> _mappoints;
   std::map<int, MaplinePtr> _maplines;
   std::map<int, FramePtr> _keyframes;

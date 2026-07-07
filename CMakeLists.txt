@@ -70,6 +70,7 @@ add_library(${PROJECT_NAME}_lib SHARED
   src/g2o_optimization/g2o_optimization.cc
   src/optimizer_backend.cpp
   src/gtsam_backend.cpp
+  src/isam_smoother.cpp
   src/bow/FSuperpoint.cc
   src/bow/database.cc
   src/super_point.cpp
