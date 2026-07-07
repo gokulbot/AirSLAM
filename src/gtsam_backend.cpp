@@ -11,6 +11,7 @@
 #include <gtsam/slam/PriorFactor.h>
 #include "gtsam_line_factor.h"
 #include "gtsam_plucker_line.h"
+#include "gtsam_imu_factor.h"
 #include "map.h"
 #include "frame.h"
 #include "mappoint.h"
@@ -323,9 +324,47 @@ int GtsamBackend::FrameOptimization(MapOfPoses& poses, MapOfPoints3d& points, Ma
   return (int)n_c - num_outlier;
 }
 
+// Visual-inertial initialization re-expressed in GTSAM, mirroring g2o's IMUInitialization: poses
+// fixed from vision; estimate per-keyframe velocities + a single shared gyro/acc bias + the gravity
+// direction Rwg, linked by AirSLAM's EdgeIMU preintegration constraint (custom GtsamImuFactor) plus
+// soft bias priors (g2o's EdgeGyr/EdgeAcc with info 1e2 / 1e5). Batch Levenberg-Marquardt.
 bool GtsamBackend::IMUInitialization(MapOfPoses& poses, MapOfVelocity& velocities, Bias& bias,
     std::vector<CameraPtr>& camera_list, VectorOfIMUConstraints& imu_constraints, Eigen::Matrix3d& Rwg) {
-  return ::IMUInitialization(poses, velocities, bias, camera_list, imu_constraints, Rwg);
+  using namespace gtsam;
+  using symbol_shorthand::V;
+  const Key Bg = Symbol('b', 0), Ba = Symbol('c', 0), Gk = Symbol('r', 0);
+  if (imu_constraints.empty() || velocities.empty()) return false;
+
+  NonlinearFactorGraph graph; Values values;
+  for (auto& kv : velocities) values.insert(V(kv.first), Vector3(kv.second.velocity));
+  values.insert(Bg, Vector3(bias.gyr_bias));
+  values.insert(Ba, Vector3(bias.acc_bias));
+  values.insert(Gk, GravityDir(Rwg));
+  graph.addPrior(Bg, Vector3(bias.gyr_bias), noiseModel::Isotropic::Sigma(3, 1.0 / std::sqrt(1e2)));   // EdgeGyr prior
+  graph.addPrior(Ba, Vector3(bias.acc_bias), noiseModel::Isotropic::Sigma(3, 1.0 / std::sqrt(1e5)));   // EdgeAcc prior
+
+  for (auto& ipc : imu_constraints) {
+    if (!velocities.count(ipc->id_pose1) || !velocities.count(ipc->id_pose2)) continue;
+    Pose3d& p1 = poses[ipc->id_pose1]; Pose3d& p2 = poses[ipc->id_pose2];
+    Eigen::Matrix4d T1 = camera_list[p1.id_camera]->BodyToCamera(), T2 = camera_list[p2.id_camera]->BodyToCamera();
+    Eigen::Matrix3d Rwb1 = p1.R * T1.block<3, 3>(0, 0), Rwb2 = p2.R * T2.block<3, 3>(0, 0);
+    Eigen::Vector3d twb1 = p1.p + p1.R * T1.block<3, 1>(0, 3), twb2 = p2.p + p2.R * T2.block<3, 1>(0, 3);
+    SharedNoiseModel noise;
+    try { noise = noiseModel::Gaussian::Covariance(ipc->preinteration->Cov.block<9, 9>(0, 0)); }
+    catch (const std::exception&) { continue; }
+    graph.emplace_shared<GtsamImuFactor>(V(ipc->id_pose1), Bg, Ba, V(ipc->id_pose2), Gk,
+        ipc->preinteration, Rwb1, twb1, Rwb2, twb2, noise);
+  }
+
+  Values result;
+  try { result = LevenbergMarquardtOptimizer(graph, values).optimize(); }
+  catch (const std::exception&) { return false; }
+
+  for (auto& kv : velocities) kv.second.velocity = result.at<Vector3>(V(kv.first));
+  bias.gyr_bias = result.at<Vector3>(Bg);
+  bias.acc_bias = result.at<Vector3>(Ba);
+  Rwg = result.at<GravityDir>(Gk).Rwg();
+  return true;
 }
 
 // Full-map bundle adjustment re-expressed in GTSAM, mirroring g2o's GlobalBA: extract the whole map
