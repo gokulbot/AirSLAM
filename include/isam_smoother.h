@@ -9,12 +9,27 @@
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/nonlinear/ISAM2.h>
 
+#include "imu.h"   // PreinterationPtr
+
 // One stereo-point observation from a keyframe (u, v, u_right); Xw_init is the landmark's initial
 // 3D position, used only the first time the landmark is seen.
 struct StereoObservation {
   int landmark_id;
   Eigen::Vector3d Xw_init;
   Eigen::Vector3d keypoint;
+};
+
+// Optional per-keyframe IMU data (VIO). When active, the smoother adds a velocity variable for this
+// keyframe and an IMU factor linking it to prev_kf_id via the preintegration; a shared bias +
+// gravity are created on the first VI keyframe. Empty (active=false) => vision-only keyframe.
+struct ImuKeyframeData {
+  bool active = false;
+  int prev_kf_id = -1;
+  Eigen::Vector3d vel_init = Eigen::Vector3d::Zero();
+  PreinterationPtr preint = nullptr;
+  Eigen::Matrix3d Rwg = Eigen::Matrix3d::Identity();
+  Eigen::Vector3d gyr_bias = Eigen::Vector3d::Zero();
+  Eigen::Vector3d acc_bias = Eigen::Vector3d::Zero();
 };
 
 // Incremental iSAM2 smoother for the online pipeline. Fed one keyframe at a time as VO produces
@@ -33,12 +48,13 @@ class IsamSmoother {
   // Add a keyframe: its body pose Twb (initial guess) + its stereo observations. The first keyframe
   // should be the anchor (adds a pose prior to fix the gauge).
   void AddKeyframe(int kf_id, const gtsam::Pose3& Twb_init, bool anchor,
-                   const std::vector<StereoObservation>& obs);
+                   const std::vector<StereoObservation>& obs, const ImuKeyframeData& imu = ImuKeyframeData());
 
   gtsam::Pose3 GetBodyPose(int kf_id) const;
   Eigen::Matrix<double, 6, 6> GetCovariance(int kf_id);
   double PositionSigma(int kf_id);         // sqrt(trace of translation covariance), metres
   int NumKeyframes() const { return static_cast<int>(kf_ids_.size()); }
+  bool IsVisualInertial() const { return vi_initialized_; }
   const std::vector<int>& KeyframeIds() const { return kf_ids_; }
 
  private:
@@ -48,6 +64,8 @@ class IsamSmoother {
   double fx_, fy_, cx_, cy_, bf_;
   std::set<int> known_landmarks_;
   std::vector<int> kf_ids_;
+  bool vi_initialized_ = false;      // shared bias + gravity added?
+  std::set<int> kf_with_velocity_;   // keyframes that have a velocity variable (for IMU-factor linking)
 };
 typedef std::shared_ptr<IsamSmoother> IsamSmootherPtr;
 

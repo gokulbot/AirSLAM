@@ -868,11 +868,22 @@ void Map::LocalMapOptimization(FramePtr new_frame){
     }
     Eigen::Matrix4d Twc = new_frame->GetPose();
     gtsam::Pose3 Twc_p(gtsam::Rot3(Twc.block<3,3>(0,0)), gtsam::Point3(Twc.block<3,1>(0,3)));
+    ImuKeyframeData imu;   // VIO: attach velocity + preintegration once IMU is initialized
+    if(_camera->UseIMU() && IMUInit()){
+      imu.active = true;
+      imu.vel_init = new_frame->GetVelocity();
+      imu.preint = new_frame->GetIMUPreinteration();
+      FramePtr prev = new_frame->PreviousFrame();
+      imu.prev_kf_id = prev ? prev->GetFrameId() : -1;
+      imu.Rwg = _Rwg;
+      new_frame->GetBias(imu.gyr_bias, imu.acc_bias);
+    }
     int kf_id = new_frame->GetFrameId();
     bool anchor = (_isam_smoother->NumKeyframes() == 0);
-    _isam_smoother->AddKeyframe(kf_id, Twc_p * Tcb_p, anchor, obs);
+    _isam_smoother->AddKeyframe(kf_id, Twc_p * Tcb_p, anchor, obs, imu);
     if(kf_id % 20 == 0){   // build the whole line first so it doesn't interleave with the VO thread's stdout
-      std::string msg = "[iSAM2] kf " + std::to_string(kf_id) + " pos-sigma=" +
+      std::string msg = "[iSAM2] kf " + std::to_string(kf_id) +
+          (_isam_smoother->IsVisualInertial() ? " [VI]" : " [V]") + " pos-sigma=" +
           std::to_string(_isam_smoother->PositionSigma(kf_id) * 1000) + "mm (" +
           std::to_string(_isam_smoother->NumKeyframes()) + " kfs)\n";
       std::cout << msg;
