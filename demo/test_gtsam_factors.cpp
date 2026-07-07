@@ -13,6 +13,7 @@
 #include "g2o_optimization/vertex_vi_pose.h"
 #include "g2o_optimization/vertex_line3d.h"
 #include "gtsam_line_factor.h"
+#include "gtsam_plucker_line.h"
 #include <g2o/types/slam3d/vertex_pointxyz.h>
 
 #include <gtsam/geometry/Pose3.h>
@@ -121,8 +122,20 @@ int main() {
 
   std::cout << "UNARY POINT   mono_res=" << d_umono << "  stereo_res=" << d_ustereo << "\n";
 
+  // ---------- Plucker line manifold ----------
+  PluckerLine pl(line_w);
+  Eigen::Vector4d dv(0.01, -0.02, 0.015, 0.05);
+  double d_rt = (dv - pl.localCoordinates(pl.retract(dv))).norm();                       // oplus/ominus
+  double d_tr = (dv - traits<PluckerLine>::Local(pl, traits<PluckerLine>::Retract(pl, dv))).norm();  // via traits
+  GtsamMonoLineBAFactor baf(kPose, 99, obs_line, fx, fy, Kv, Tbc, noiseModel::Isotropic::Sigma(2, std::sqrt(10.0)));
+  Matrix H1, H2;
+  baf.evaluateError(Twb, pl, H1, H2);
+  bool jac_ok = H2.rows() == 2 && H2.cols() == 4 && H2.allFinite() && H2.norm() > 1e-9;
+  std::cout << "PLUCKER LINE  oplus/ominus_rt=" << d_rt << "  traits_rt=" << d_tr
+            << "  binaryJac(2x4)=" << (jac_ok ? "finite&nonzero" : "BAD") << "\n";
+
   bool ok = d_mono < 1e-6 && d_stereo < 1e-6 && d_lmono < 1e-6 && d_lstereo < 1e-6 &&
-            d_umono < 1e-6 && d_ustereo < 1e-6;
+            d_umono < 1e-6 && d_ustereo < 1e-6 && d_rt < 1e-5 && d_tr < 1e-5 && jac_ok;
   std::cout << (ok ? "PASS: GTSAM point + line factors match g2o edges\n" : "FAIL: mismatch\n");
   return ok ? 0 : 1;
 }
