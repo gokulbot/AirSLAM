@@ -1,13 +1,15 @@
 #ifndef ISAM_SMOOTHER_H_
 #define ISAM_SMOOTHER_H_
 
+#include <map>
 #include <memory>
 #include <set>
+#include <utility>
 #include <vector>
 #include <Eigen/Core>
 
 #include <gtsam/geometry/Pose3.h>
-#include <gtsam/nonlinear/ISAM2.h>
+#include <gtsam_unstable/nonlinear/IncrementalFixedLagSmoother.h>
 
 #include "imu.h"   // PreinterationPtr
 
@@ -58,11 +60,15 @@ class IsamSmoother {
   const std::vector<int>& KeyframeIds() const { return kf_ids_; }
 
  private:
-  gtsam::ISAM2 isam_;
+  std::shared_ptr<gtsam::IncrementalFixedLagSmoother> smoother_;   // iSAM2 + fixed-lag marginalization
   gtsam::Values estimate_;
   gtsam::Pose3 Tbc_;
   double fx_, fy_, cx_, cy_, bf_;
-  std::set<int> known_landmarks_;
+  double time_ = 0.0;                // keyframe counter, used as the fixed-lag "time"
+  // fix #1 (like g2o's mature map points): a landmark enters the smoother only once >=2 keyframes
+  // observe it (so it genuinely connects poses); no loose-prior crutch.
+  std::map<int, std::vector<std::pair<int, Eigen::Vector3d>>> pending_;   // immature: lm -> [(kf, keypoint)]
+  std::set<int> mature_;             // landmarks currently in the smoother
   std::vector<int> kf_ids_;
   bool vi_initialized_ = false;      // shared bias + gravity added?
   std::set<int> kf_with_velocity_;   // keyframes that have a velocity variable (for IMU-factor linking)

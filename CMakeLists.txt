@@ -108,6 +108,7 @@ target_link_libraries(${PROJECT_NAME}_lib
   ${Boost_LIBRARIES}
   ${G2O_LIBRARIES}
   gtsam
+  gtsam_unstable
   ${GFLAGS_LIBRARIES} 
   ${GLOG_LIBRARIES}
   yaml-cpp
