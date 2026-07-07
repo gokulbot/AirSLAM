@@ -72,6 +72,14 @@ int main() {
       StereoPoint2(kp3(0), kp3(2), kp3(1)), noiseModel::Isotropic::Sigma(3, 1.0), kPose, kPoint, Kstereo, Tbc);
   Vector err_gtsam_stereo = sf.evaluateError(Twb, Point3(Xw));  // order (uL, uR, v)
 
+  // ---------- unary point factors (pose-only, point baked in) ----------
+  GtsamMonoPointFactor upf(kPose, Point3(Xw), Point2(kp), fx, fy, cx, cy, Tbc, noiseModel::Isotropic::Sigma(2, 1.0));
+  Vector2 err_unary_mono = upf.residual(Twb);            // pred - measured (opp sign to g2o)
+  GtsamStereoPointFactor uspf(kPose, Point3(Xw), Vector3(kp3), fx, fy, cx, cy, bf, Tbc, noiseModel::Isotropic::Sigma(3, 1.0));
+  Vector3 err_unary_stereo = uspf.residual(Twb);         // order (u,v,uR), same as g2o edge
+  double d_umono = (err_g2o_mono + err_unary_mono).norm();
+  double d_ustereo = (err_g2o_stereo + err_unary_stereo).norm();
+
   // ---------- line factors (fixed Plucker line, unary on pose) ----------
   Eigen::Vector3d Kv(-cx * fy, -fx * cy, fx * fy);
   Eigen::Vector3d LP0(0.1, 0.2, 2.5), LP1(0.6, -0.1, 2.8);        // world line through two points
@@ -111,7 +119,10 @@ int main() {
   std::cout << "STEREO LINE   g2o=[" << err_g2o_lstereo.transpose() << "]  gtsam=[" << err_gtsam_lstereo.transpose()
             << "]  residual=" << d_lstereo << "\n";
 
-  bool ok = d_mono < 1e-6 && d_stereo < 1e-6 && d_lmono < 1e-6 && d_lstereo < 1e-6;
+  std::cout << "UNARY POINT   mono_res=" << d_umono << "  stereo_res=" << d_ustereo << "\n";
+
+  bool ok = d_mono < 1e-6 && d_stereo < 1e-6 && d_lmono < 1e-6 && d_lstereo < 1e-6 &&
+            d_umono < 1e-6 && d_ustereo < 1e-6;
   std::cout << (ok ? "PASS: GTSAM point + line factors match g2o edges\n" : "FAIL: mismatch\n");
   return ok ? 0 : 1;
 }

@@ -37,6 +37,62 @@ inline g2o::Isometry3 CameraTcwIso(const gtsam::Pose3& Twb, const gtsam::Pose3& 
   return g2o::internal::fromSE3Quat(Tcw_se3);
 }
 
+// Unary point reprojection factors for a FIXED 3D point (as in FrameOptimization). Pose-only, so
+// the graph stays 6-DOF and matches g2o's marginalized landmarks. Projection is g2o's exact
+// cam_project (validated in test_gtsam_factors), computed manually to avoid GTSAM cheirality throws.
+class GtsamMonoPointFactor : public gtsam::NoiseModelFactor1<gtsam::Pose3> {
+  gtsam::Point3 Xw_;
+  gtsam::Point2 obs_;
+  double fx_, fy_, cx_, cy_;
+  gtsam::Pose3 Tbc_;
+
+ public:
+  GtsamMonoPointFactor(gtsam::Key poseKey, const gtsam::Point3& Xw, const gtsam::Point2& obs,
+                       double fx, double fy, double cx, double cy, const gtsam::Pose3& Tbc,
+                       const gtsam::SharedNoiseModel& model)
+      : gtsam::NoiseModelFactor1<gtsam::Pose3>(model, poseKey),
+        Xw_(Xw), obs_(obs), fx_(fx), fy_(fy), cx_(cx), cy_(cy), Tbc_(Tbc) {}
+
+  gtsam::Vector2 residual(const gtsam::Pose3& Twb) const {
+    gtsam::Point3 Xc = (Twb * Tbc_).inverse() * Xw_;   // point in camera frame
+    double zi = 1.0 / Xc.z();
+    return gtsam::Vector2(Xc.x() * zi * fx_ + cx_ - obs_.x(), Xc.y() * zi * fy_ + cy_ - obs_.y());
+  }
+  gtsam::Vector evaluateError(const gtsam::Pose3& Twb,
+                              boost::optional<gtsam::Matrix&> H = boost::none) const override {
+    if (H) *H = gtsam::numericalDerivative11<gtsam::Vector2, gtsam::Pose3>(
+        [this](const gtsam::Pose3& p) { return this->residual(p); }, Twb);
+    return residual(Twb);
+  }
+};
+
+class GtsamStereoPointFactor : public gtsam::NoiseModelFactor1<gtsam::Pose3> {
+  gtsam::Point3 Xw_;
+  gtsam::Vector3 obs_;         // (u, v, u_right)
+  double fx_, fy_, cx_, cy_, bf_;
+  gtsam::Pose3 Tbc_;
+
+ public:
+  GtsamStereoPointFactor(gtsam::Key poseKey, const gtsam::Point3& Xw, const gtsam::Vector3& obs,
+                         double fx, double fy, double cx, double cy, double bf, const gtsam::Pose3& Tbc,
+                         const gtsam::SharedNoiseModel& model)
+      : gtsam::NoiseModelFactor1<gtsam::Pose3>(model, poseKey),
+        Xw_(Xw), obs_(obs), fx_(fx), fy_(fy), cx_(cx), cy_(cy), bf_(bf), Tbc_(Tbc) {}
+
+  gtsam::Vector3 residual(const gtsam::Pose3& Twb) const {
+    gtsam::Point3 Xc = (Twb * Tbc_).inverse() * Xw_;
+    double zi = 1.0 / Xc.z();
+    double u = Xc.x() * zi * fx_ + cx_, v = Xc.y() * zi * fy_ + cy_;
+    return gtsam::Vector3(u - obs_(0), v - obs_(1), (u - bf_ * zi) - obs_(2));
+  }
+  gtsam::Vector evaluateError(const gtsam::Pose3& Twb,
+                              boost::optional<gtsam::Matrix&> H = boost::none) const override {
+    if (H) *H = gtsam::numericalDerivative11<gtsam::Vector3, gtsam::Pose3>(
+        [this](const gtsam::Pose3& p) { return this->residual(p); }, Twb);
+    return residual(Twb);
+  }
+};
+
 class GtsamMonoLineFactor : public gtsam::NoiseModelFactor1<gtsam::Pose3> {
   g2o::Line3D line_w_;         // fixed 3D line (world)
   Eigen::Vector4d obs_;        // observed 2D endpoints [x1,y1,x2,y2]
