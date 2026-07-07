@@ -76,6 +76,10 @@ Time is not a constraint — so optimize for **understanding, not delivery speed
 2. **Semantics enter asymmetrically** — points/lines are landmarks (reprojection factors); semantics are a *gate/pose channel*. **Never double-count** the semantic-PnP pose against the geometric factors (shared pixels ≠ independent → overconfidence).
 3. **CPU/GPU split** — iSAM2 + hypothesis-tree management stay sequential CPU; only the *batched* BA/hypothesis numerics go to GPU. GPU never lives *inside* iSAM2.
 4. **Ambiguity is a feature** — semantic ambiguity → pose uncertainty (EPro-PnP) → multiple hypotheses (MH-iSAM2) → resolved by geometry + semantics.
+5. **Navigation consumes the map; it never lives in the estimator** — planner/controller are downstream of iSAM2, never inside it (same rule as dense geometry). Factor graph = state; costmap/scene-graph = products. *(nav — Phase 9)*
+6. **The scene graph is the SLAM↔nav interface** — everything the planner needs (traversable geometry, place/object semantics, connectivity) is exposed as one structure; nav talks to *that*, not to raw `mappoints`/`maplines`. *(nav — Phase 9)*
+7. **Uncertainty flows both ways** — SLAM covariances drive *where to go* (active SLAM); nav goals drive *what gets mapped well*. This bidirectional coupling is what makes nav reinforce the optimization work instead of sitting beside it. *(nav — Phase 9)*
+8. **Navigation reads the map, never writes the estimator** — a goal-grounding pose from the same features feeding reprojection factors is *not* independent (principle 2 again); nav consumes the map, it never injects evidence back as a new measurement. *(nav — Phase 9)*
 
 > This is the north-star **target**. Everything upstream of the FACTOR GRAPH is provisional until **Phase 5** measures whether one representation can serve both fine geometry and coarse semantics (unified net vs. split backbones).
 
@@ -116,13 +120,15 @@ neither of which is a from-scratch-optimizer problem:
 - **Done when:** cross-condition reloc success beats DBoW2 on a day↔night / lighting-change sequence; ATE holds. *(Python retrieval bar already met.)*
 - **Effort:** weekend (Python compare ✅) → 1–2 weeks (full C++).
 
-### Phase 2 — Fine-tune DINOv2 for VPR *(the ML-skills detour)*
-- **Goal:** Learn fine-tuning itself, using Phase 1 as the testbed.
-- **Do:** ladder — frozen AnyLoc → head-only metric learning (GSV-Cities + Multi-Similarity loss, cache backbone feats for fast iteration) → LoRA/PEFT on the ViT → partial unfreeze.
-- **Learn:** metric learning, hard mining, PEFT/LoRA, evaluation protocol.
-- **Read:** GSV-Cities (amaralibey), SALAD (serizba), HF `peft`.
-- **Done when:** fine-tuned ViT-S/B improves day-night Recall@5 vs frozen on Tokyo 24/7 / SVOX; dropped back into Phase-1 retrieval.
-- **Effort:** 1–2 weeks.
+### Phase 2 — Fine-tune for the *real* bottleneck *(the ML-skills detour — LATER, redirected)*
+- **Status: the original premise is DEAD.** Phase 2 was "fine-tune DINOv2 to retrieve better," but Phase 1 proved **retrieval is not the bottleneck** — AnyLoc already hits R@1 99.4% at night; the full reloc caps at ~70% because the **shared SuperPoint verification** dies on dark query frames (better global descriptors can't fix a frame SuperPoint can't verify), and same-session DBoW2 is already sufficient. So *fine-tuning DINO for VPR is pointless* — it sharpens the one thing that's already excellent.
+- **The skill still matters — point it at what Phase 1 surfaced.** Two high-value future targets (either teaches metric-learning / PEFT / distillation):
+  1. **Illumination-robust *local* features (the big one).** The verification ceiling IS SuperPoint failing in the dark. Fine-tune / distill a keypoint+descriptor net that survives low light → lifts the ceiling for **every** method (DBoW2 *and* DINO). Highest-leverage ML task the whole investigation revealed.
+  2. **Distill AnyLoc → a small model.** ViT-G/VLAD is offline-only (heavy). Distill its night-robustness into a ViT-S-sized descriptor → makes the native 71.8% night-reloc win deployable at **frame rate** online, not just offline.
+- **Learn (unchanged):** metric learning, hard mining, PEFT/LoRA, knowledge distillation, evaluation protocol.
+- **Read:** GSV-Cities (amaralibey), SALAD (serizba), HF `peft`; for (1) SuperPoint/ALIKED/DISK training + low-light augmentation / GIM-style distillation.
+- **Done when (redirected):** (1) low-light local features raise dark-query *reloc* recall past the current ~70% ceiling; or (2) a small distilled descriptor keeps most of AnyLoc's night R@5 at ViT-S cost.
+- **Effort:** 1–2 weeks. **Priority: after Phase 3** (do the backbone/novel work first; this is a stop-anywhere detour).
 
 ### Phase 3 — Migrate backend g2o → GTSAM *(adopt, don't rebuild)*
 - **Goal:** Move AirSLAM's optimization from **g2o** to **GTSAM** and hit ATE parity. Understand the factor graph by *re-expressing* AirSLAM's factors in GTSAM, not by cloning it.
@@ -171,6 +177,78 @@ neither of which is a from-scratch-optimizer problem:
 - **Done when:** measurable speedup on the many-hypothesis workload vs the CPU path.
 - **Effort:** open-ended (only if pursued).
 
+### Phase 9 — Semantic Navigation *(Tier A first — nav that feeds back into the SLAM spine)*
+- **Goal:** Turn the semantic map into a system that *acts* — but only in the way that **deepens** the SLAM / optimization / foundation-model mastery this roadmap is about. Navigation enters as a **consumer of the factor graph and the scene graph**, never as logic inside the estimator.
+- **Framing — two tiers, and the tiering is the point:**
+  - **Tier A (why nav belongs in *this* roadmap):** ideas where navigation is driven *by* the optimization/semantics you already built — active SLAM off iSAM2 covariances, active MHT resolution, goal-grounding on the DINO retrieval stack, the scene graph. These *reinforce* the mastery goals.
+  - **Tier B (scaffolding):** the generic nav stack — dense costmap, planners, controller, a robot body. Necessary only to *demonstrate* navigation; kept deliberately off-the-shelf. Not where the depth goes.
+  - Build Tier A first. Tier B is the minimum needed to close the loop and show it moving.
+
+- **Load-bearing principles:** hoisted into the global **Load-bearing principles** list up top — items **5–8** (nav consumes the map, never in the estimator · scene graph = the SLAM↔nav interface · uncertainty flows both ways · nav reads the map, never writes the estimator).
+
+#### Tier A — nav that deepens the mastery spine (high reuse)
+
+**A1 — Active SLAM / uncertainty-aware exploration.**
+- **Goal:** Choose motions that minimize pose/map uncertainty — next-best-view and active loop-closure driven by the factor graph's own information.
+- **Do:** recover marginal covariances from the Phase-4 iSAM2 backend; score candidate goals by D-/A-optimality (expected info gain); pick the exploration target that most reduces uncertainty. This turns iSAM2 mastery into a *decision* signal, not just an estimate.
+- **Reuses:** Phase 3–4 (GTSAM/iSAM2 covariances), covisibility graph.
+- **Read:** active-SLAM survey (Placed et al. 2023); belief-space planning (Indelman/Kaess).
+- **Done when:** active exploration reaches lower final map/pose covariance (and ATE) per unit path length than a fixed/random trajectory.
+
+**A2 — Navigate-to-disambiguate (active MHT resolution).**
+- **Goal:** When Phase 7 spawns multiple ambiguous hypotheses (perceptual aliasing), *move the robot to go look* and collapse them — the physical-action counterpart to MHT pruning.
+- **Do:** from the hypo-tree, synthesize an information-gathering goal (a viewpoint whose observation maximally separates the competing hypotheses' likelihoods); execute it; let geometry + semantics resolve. Closes a loop between Phases 6/7 and navigation that almost nothing ships.
+- **Reuses:** Phase 7 hypo-tree, Phase 6 semantics, A1's info-gain machinery.
+- **Done when:** a perceptual-aliasing case that the passive backend leaves ambiguous is resolved by one disambiguating maneuver.
+
+**A3 — Semantic goal grounding on the existing retrieval stack.**
+- **Goal:** Specify goals by *meaning* — "go to the place that looks like X," "find a chair" — grounded to a metric target via the map.
+- **Do:** point the Phase-1 AnyLoc/DINOv2 + FAISS retrieval at **goals instead of loop candidates** (VPR over the map = place goals); open-vocab object goals from Phase-5 semantic / DINOv2 patch features → nearest map entity → metric pose. "One representation, reused everywhere" paying off a *third* time.
+- **Reuses:** Phase 1 retrieval infra wholesale, Phase 2 fine-tuned embeddings, Phase 5 semantics.
+- **Read:** VLMaps; NLMap; OpenScene / open-vocab 3D.
+- **Done when:** a language/image goal resolves to the correct map location on a known sequence, then drives A4→B3 to reach it.
+
+**A4 — Semantic 3D scene graph (the interface layer).**
+- **Goal:** Build the structure Tier A and the planner both talk to: rooms/objects/places as nodes; connectivity/containment/traversability as edges.
+- **Do:** fuse the dense map (B1) + Phase-5/6 semantics into a Hydra/Kimera-style layered scene graph; expose it as the single nav-facing API. A scene graph is a graph you already know how to optimize — reuse the covisibility + GTSAM experience.
+- **Reuses:** covisibility graph, GTSAM factor-graph tooling, Phase 5–6 semantics.
+- **Read:** Hydra (Hughes & Carlone); Kimera; 3D Scene Graphs (Armeni et al.).
+- **Done when:** a queryable scene graph is produced online and A3 goals + B3 planning route through it end-to-end.
+
+#### Tier B — the nav stack proper (scaffolding; off-the-shelf first)
+
+**B1 — Dense, plannable map** *(the hard blocker, regardless of route).* OctoMap occupancy (planning-light) or TSDF/surfel (surfaces), fused from optimized keyframe poses + depth, re-deformed after loop closure & global BA. Sparse-solve / dense-render — **keep it out of the graph.** Concrete first step: the existing `depth_*_thr` configs + OpenLORIS D435i already give a depth input path. *(Ties into the "map you can navigate" candidate-technique note.)*
+
+**B2 — Semantic costmap.** Meaning-aware traversability: prefer "floor," avoid "person" / dynamic (reuse Phase-6 dynamic rejection), encode doorway/stair/social cost. The layer that makes it *semantic* navigation, not geometric.
+
+**B3 — Planners.** Global (A*/RRT over the costmap, or graph search over the A4 scene graph) + local (DWA / TEB / MPPI). Off-the-shelf first; go custom only if a research question demands it.
+
+**B4 — Controller + a body.** `cmd_vel`, TF tree, and a platform to actually act — where AirSLAM's camera-only nature bites. Substrate decided by the infra fork below.
+
+#### Infra decision to lock before investing in Tier B
+**Where does the robot live?** Two forks — pick per goal, record like the other open decisions:
+- **Sim, research-first:** Habitat / AI2-THOR-RoboTHOR for ObjectNav & VLN — no physical base, leans into A3/VLN, standard benchmarks, best fit for the writeup ethos.
+- **ROS2 / Nav2, real (or Gazebo/Isaac) base:** real navigation, more plumbing — **caveat: AirSLAM is ROS1 (noetic, EOL)**, so this forces a ROS2 port or bridge. Do not build Tier B on ROS1.
+- *Lean: prototype Tier A in sim; commit to ROS2/Nav2 only if a real-base demo becomes the goal.*
+
+#### Candidate techniques (nav parking lot — try if pursued)
+- **LLM/VLM high-level planner over the scene graph** — "bring me the mug from the kitchen" → LLM decomposes → graph search over A4. The foundation-model theme extended to *acting* (SayCan / LM-Nav / VLMaps lineage).
+- **Vision-Language Navigation (VLN)** — instruction-following nav as a benchmark target; ties A3's open-vocab goals to sequential decisions.
+- **Semantic frontier exploration** — bias frontier selection toward semantically-promising regions ("looking for a fridge → head toward kitchen-like rooms") — a cheap fusion of A1 + A3.
+- **Learned local policies (RL / imitation)** — end-to-end local nav as a contrast to classical B3; only if the ML detour is wanted, else skip.
+
+#### Datasets & metrics
+Hoisted into the global **Datasets & evaluation** section — see the **Navigation** and **Active SLAM** entries.
+
+#### Risks & tensions
+- **Scope explosion / focus dilution** — Tier B is a whole discipline; gate it behind "demo-only," resist building a planner before A1–A4 justify one. Stop-anywhere protects you.
+- **ROS1 dead-end** — noetic is EOL; committing to ROS1 nav is building on sand → settle the sim-vs-ROS2 fork first.
+- **Sim-to-real gap** — a Habitat ObjectNav win ≠ a working robot; state which is being claimed.
+- **Double-counting via the back door** — see load-bearing principle 8 up top; nav's use of the map stays read-only w.r.t. the estimator.
+
+- **Done when (phase):** an A3 semantic goal, grounded through the A4 scene graph, is reached by B3 planning on the B1 map — **and** at least one Tier-A feedback result holds (A1: active exploration lowers uncertainty/ATE per path length, *or* A2: a disambiguating maneuver resolves a hypothesis the passive backend cannot).
+- **Effort:** open-ended — Tier A ~4–8 weeks each (research-grade; A1/A2 are the deep, novel pieces); Tier B a few weeks of mostly-integration if kept off-the-shelf. Off the critical path until the semantic map (Phases 5–6) exists to consume.
+
 ---
 
 ## Cross-cutting decisions
@@ -208,6 +286,8 @@ neither of which is a from-scratch-optimizer problem:
 - **Dynamic / semantic:** TUM dynamic, Bonn dynamic. Metric: ATE vs geometric-only.
 - **Dense mapping / depth:** TUM-RGBD & OpenLORIS (D435i depth), ICL-NUIM, ScanNet, ETH3D. Metrics: reconstruction accuracy/completeness, learned-depth AbsRel/RMSE, map memory footprint.
 - **Loop closure:** precision-recall of proposals (false loops are catastrophic).
+- **Navigation:** Habitat (HM3D, MP3D, Gibson), RoboTHOR, Matterport3D for ObjectNav / VLN; OpenLORIS for a real-trajectory demo. Metrics: Success Rate (SR), **SPL** (success weighted by path length), SoftSPL, collision rate, exploration coverage.
+- **Active SLAM:** final map/pose covariance & ATE **per unit path length** (does active exploration actually buy accuracy?).
 - **Optimizer:** per-layer diff vs GTSAM oracle (same graph → same solution within tolerance); per-step latency vs batch.
 
 ## Risks & mitigations
