@@ -133,6 +133,9 @@ target_link_libraries(test_dino ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
 add_executable(test_anyloc demo/test_anyloc.cpp)
 target_link_libraries(test_anyloc ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
 
+add_executable(test_gtsam_factors demo/test_gtsam_factors.cpp)
+target_link_libraries(test_gtsam_factors ${PROJECT_NAME}_lib ${catkin_LIBRARIES} gtsam)
+
 add_executable(add_dino_descriptors demo/add_dino_descriptors.cpp)
 target_link_libraries(add_dino_descriptors ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
 
