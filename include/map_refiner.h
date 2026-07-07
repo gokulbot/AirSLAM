@@ -9,6 +9,7 @@
 #include "super_point.h"
 #include "super_glue.h"
 #include "read_configs.h"
+#include "optimizer_backend.h"
 #include "imu.h"
 #include "dataset.h"
 #include "camera.h"
@@ -91,6 +92,7 @@ private:
 private:
   // class
   MapRefinementConfigs _configs;
+  OptimizerBackendPtr _optimizer = std::make_shared<G2oBackend>();   // swappable backend (g2o today, GTSAM next)
   PointMatcherPtr _point_matcher;
   MapPtr _map;
   CameraPtr _camera;

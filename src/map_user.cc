@@ -455,7 +455,7 @@ bool MapUser::Relocalization(cv::Mat& image, const std::string& image_name, Eige
 
     if(points.size() < _configs.min_inlier) return false;
 
-    num_inliers = FrameOptimization(poses, points, lines, velocities, biases, camera_list, 
+    num_inliers = _optimizer->FrameOptimization(poses, points, lines, velocities, biases, camera_list,
       mono_point_constraints, stereo_point_constraints, mono_line_constraints, stereo_line_constraints,
       imu_constraints, Rwg, _configs.pose_estimation_config);
 

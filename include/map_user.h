@@ -9,6 +9,7 @@
 #include "feature_detector.h"
 #include "super_glue.h"
 #include "read_configs.h"
+#include "optimizer_backend.h"
 #include "dino_extractor.h"
 #include "anyloc_extractor.h"
 #include "imu.h"
@@ -51,6 +52,7 @@ public:
 private:
   // class
   RelocalizationConfigs _configs;
+  OptimizerBackendPtr _optimizer = std::make_shared<G2oBackend>();   // swappable backend (g2o today, GTSAM next)
   FeatureDetectorPtr _feature_detector;
   PointMatcherPtr _point_matcher;
   MapPtr _map;

@@ -66,6 +66,7 @@ add_library(${PROJECT_NAME}_lib SHARED
   src/g2o_optimization/edge_imu.cc
   src/g2o_optimization/edge_relative_pose.cc
   src/g2o_optimization/g2o_optimization.cc
+  src/optimizer_backend.cpp
   src/bow/FSuperpoint.cc
   src/bow/database.cc
   src/super_point.cpp

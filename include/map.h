@@ -12,6 +12,7 @@
 
 #include "read_configs.h"
 #include "camera.h"
+#include "optimizer_backend.h"
 #include "mappoint.h"
 #include "mapline.h"
 #include "frame.h"
@@ -120,6 +121,7 @@ private:
 private:
   OptimizationConfig _backend_optimization_config;
   CameraPtr _camera;
+  OptimizerBackendPtr _optimizer = std::make_shared<G2oBackend>();   // swappable backend (g2o today, GTSAM next)
   std::map<int, MappointPtr> _mappoints;
   std::map<int, MaplinePtr> _maplines;
   std::map<int, FramePtr> _keyframes;

@@ -753,7 +753,7 @@ void Map::LocalMapOptimization(FramePtr new_frame){
     }
   }
 
-  LocalmapOptimization(poses, points, lines, velocities, biases, camera_list, mono_point_constraints, 
+  _optimizer->LocalmapOptimization(poses, points, lines, velocities, biases, camera_list, mono_point_constraints, 
       stereo_point_constraints, mono_line_constraints, stereo_line_constraints, imu_constraints, Rwg, _backend_optimization_config);
 
   // erase point outliers
@@ -1142,7 +1142,7 @@ bool Map::InitializeIMU(FramePtr frame){
 
   // std::cout << "-------------------Before initialization----------------------" << std::endl;
   // ValidateError(poses, velocities, bias, camera_list, imu_constraints, Rwg, prior_gyr_bias, prior_acc_bias);
-  if(!IMUInitialization(poses, velocities, bias, camera_list, imu_constraints, Rwg)) return false;
+  if(!_optimizer->IMUInitialization(poses, velocities, bias, camera_list, imu_constraints, Rwg)) return false;
 
   // std::cout << "-------------------After initialization----------------------" << std::endl;
   // ValidateError(poses, velocities, bias, camera_list, imu_constraints, Rwg, prior_gyr_bias, prior_acc_bias);

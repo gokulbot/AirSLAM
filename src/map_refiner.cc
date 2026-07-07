@@ -356,7 +356,7 @@ void MapRefiner::RelativatePoseEstimation(FramePtr frame, DBoW2::WordIdToFeature
   if(points.size() < 50) return;
 
 
-  int num_inliers = FrameOptimization(poses, points, lines, velocities, biases, camera_list, 
+  int num_inliers = _optimizer->FrameOptimization(poses, points, lines, velocities, biases, camera_list, 
     mono_point_constraints, stereo_point_constraints, mono_line_constraints, stereo_line_constraints,
     imu_constraints, Rwg, _configs.map_optimization_config);
 
@@ -567,7 +567,7 @@ void MapRefiner::PoseGraphRefinement(){
     relative_pose_constraints.push_back(rpc);
   }
 
-  PoseGraphOptimization(poses, camera_list, relative_pose_constraints);
+  _optimizer->PoseGraphOptimization(poses, camera_list, relative_pose_constraints);
 
   std::map<int, int> frame_id_to_matrix_idx;
   std::vector<Eigen::Matrix3d> mpt_tr;
@@ -650,7 +650,7 @@ void MapRefiner::MergeMap(){
   _map_mutex.lock();
   MergeMappoints();
   merged_mappoints.clear();
-  GlobalBA(_map, _configs.map_optimization_config, true, true, 10, 10);
+  _optimizer->GlobalBA(_map, _configs.map_optimization_config, true, true, 10, 10);
   MergeMaplines();
   // GlobalBA(_map, _configs.map_optimization_config, false, true, 10, 10);
   _map_mutex.unlock();
@@ -1062,7 +1062,7 @@ void MapRefiner::SaveTrajectory(std::string save_path){
 
 void MapRefiner::GlobalMapOptimization(){
   _map_mutex.lock();
-  GlobalBA(_map, _configs.map_optimization_config, true, true, 50, 40);
+  _optimizer->GlobalBA(_map, _configs.map_optimization_config, true, true, 50, 40);
   _map_mutex.unlock();
 }
 
