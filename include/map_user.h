@@ -10,6 +10,7 @@
 #include "super_glue.h"
 #include "read_configs.h"
 #include "dino_extractor.h"
+#include "anyloc_extractor.h"
 #include "imu.h"
 #include "dataset.h"
 #include "camera.h"

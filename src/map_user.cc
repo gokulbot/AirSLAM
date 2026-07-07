@@ -39,7 +39,15 @@ MapUser::MapUser(RelocalizationConfigs& configs, ros::NodeHandle nh): _configs(c
   if(_configs.use_dino){   // build the GlobalDescriptor; the PlaceRecognizer is composed in LoadMap
     if(!_configs.dino_desc_dir.empty()){
       _global_descriptor = std::shared_ptr<GlobalDescriptor>(new ExternalGlobalDescriptor(_configs.dino_desc_dir));
-      std::cout << "place recognition: descriptor cosine + external query descriptors (e.g. AnyLoc), topk=" << _dino_topk << std::endl;
+      std::cout << "place recognition: descriptor cosine + external query descriptors, topk=" << _dino_topk << std::endl;
+    }else if(_configs.dino_model == "anyloc"){
+      std::shared_ptr<AnyLocExtractor> anyloc(new AnyLocExtractor(_configs.anyloc_onnx, _configs.anyloc_engine, _configs.anyloc_vocab));
+      if(anyloc->valid() && anyloc->build()){
+        _global_descriptor = anyloc;
+        std::cout << "place recognition: descriptor cosine + native AnyLoc ViT-G/VLAD, topk=" << _dino_topk << std::endl;
+      }else{
+        std::cout << "AnyLoc extractor build FAILED; falling back to DBoW2 place recognition" << std::endl;
+      }
     }else{
       std::shared_ptr<DinoExtractor> dino(new DinoExtractor(_configs.dino_onnx, _configs.dino_engine));
       if(dino->build()){

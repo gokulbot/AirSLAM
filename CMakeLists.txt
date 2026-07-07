@@ -71,6 +71,7 @@ add_library(${PROJECT_NAME}_lib SHARED
   src/super_point.cpp
   src/trt_module.cpp
   src/dino_extractor.cpp
+  src/anyloc_extractor.cpp
   src/place_recognition.cpp
   src/feature_detector.cc
   src/super_glue.cpp
@@ -123,6 +124,9 @@ target_link_libraries(dump_bow_images ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
 
 add_executable(test_dino demo/test_dino.cpp)
 target_link_libraries(test_dino ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
+
+add_executable(test_anyloc demo/test_anyloc.cpp)
+target_link_libraries(test_anyloc ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
 
 add_executable(add_dino_descriptors demo/add_dino_descriptors.cpp)
 target_link_libraries(add_dino_descriptors ${PROJECT_NAME}_lib ${catkin_LIBRARIES})

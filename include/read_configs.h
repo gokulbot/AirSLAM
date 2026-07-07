@@ -286,7 +286,9 @@ struct RelocalizationConfigs{
   int dino_topk = 10;        // # of nearest keyframes to hand to geometric verification
   std::string dino_onnx;
   std::string dino_engine;
-  std::string dino_desc_dir; // if set, query descriptors loaded from here (external, e.g. full AnyLoc) instead of the C++ extractor
+  std::string dino_desc_dir; // if set, query descriptors loaded from here (external) instead of the C++ extractor
+  std::string dino_model = "vits";   // "vits" (ViT-S mean-pool) or "anyloc" (native ViT-G/VLAD)
+  std::string anyloc_onnx, anyloc_engine, anyloc_vocab;
 
   RelocalizationConfigs() {}
 
@@ -318,6 +320,10 @@ struct RelocalizationConfigs{
     dino_topk = file_node["dino_topk"] ? file_node["dino_topk"].as<int>() : 10;
     dino_onnx = ConcatenateFolderAndFileName(model_dir, "dinov2_vits14.onnx");
     dino_engine = ConcatenateFolderAndFileName(model_dir, "dinov2_vits14.engine");
+    dino_model = file_node["dino_model"] ? file_node["dino_model"].as<std::string>() : "vits";
+    anyloc_onnx = ConcatenateFolderAndFileName(model_dir, "anyloc_vitg14.onnx");
+    anyloc_engine = ConcatenateFolderAndFileName(model_dir, "anyloc_vitg14.engine");
+    anyloc_vocab = ConcatenateFolderAndFileName(model_dir, "anyloc_vocab.bin");
   }
 };
 
