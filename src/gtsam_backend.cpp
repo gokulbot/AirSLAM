@@ -11,6 +11,10 @@
 #include <gtsam/slam/PriorFactor.h>
 #include "gtsam_line_factor.h"
 #include "gtsam_plucker_line.h"
+#include "map.h"
+#include "frame.h"
+#include "mappoint.h"
+#include "mapline.h"
 #include <cmath>
 
 // PoseGraphOptimization re-expressed in GTSAM, mirroring g2o's PoseGraphOptimization exactly:
@@ -324,7 +328,133 @@ bool GtsamBackend::IMUInitialization(MapOfPoses& poses, MapOfVelocity& velocitie
   return ::IMUInitialization(poses, velocities, bias, camera_list, imu_constraints, Rwg);
 }
 
+// Full-map bundle adjustment re-expressed in GTSAM, mirroring g2o's GlobalBA: extract the whole map
+// (first keyframe anchored, all others + points + lines free), optimize(first_iterations) with
+// Huber, optionally reject point/line outliers (chi2 vs cfg.*, points also need depth>0), drop the
+// kernel, optimize(second_iterations), remove outlier observations from the map, write back
+// SetPose/SetPosition/SetLine3D. Point info=I; line info=cov*I (cov=0.1 if >3 observers else 0.001).
+// VI maps are forwarded to g2o (IMU factors not migrated).
 void GtsamBackend::GlobalBA(std::shared_ptr<Map> map, const OptimizationConfig& cfg, bool point_outlier_rejection,
     bool line_outlier_rejection, int first_iterations, int second_iterations) {
-  ::GlobalBA(map, cfg, point_outlier_rejection, line_outlier_rejection, first_iterations, second_iterations);
+  using namespace gtsam;
+  using symbol_shorthand::X; using symbol_shorthand::P; using symbol_shorthand::L;
+
+  if (map->IMUInit()) {
+    ::GlobalBA(map, cfg, point_outlier_rejection, line_outlier_rejection, first_iterations, second_iterations);
+    return;
+  }
+
+  std::map<int, FramePtr>& keyframes = map->GetAllKeyframes();
+  std::map<int, MappointPtr>& mappoints = map->GetAllMappoints();
+  std::map<int, MaplinePtr>& maplines = map->GetAllMaplines();
+  if (keyframes.empty()) return;
+  CameraPtr cam = map->GetCameraPtr();
+  double fx = cam->Fx(), fy = cam->Fy(), cx = cam->Cx(), cy = cam->Cy(), bf = cam->BF();
+  Eigen::Vector3d Kv(-cx * fy, -fx * cy, fx * fy);
+  Pose3 Tcb(Rot3(cam->BodyToCamera().block<3, 3>(0, 0)), Point3(cam->BodyToCamera().block<3, 1>(0, 3)));
+  Pose3 Tbc = Tcb.inverse();
+  const int anchor = keyframes.begin()->first;
+
+  Values values;
+  for (auto& kv : keyframes) {
+    Eigen::Matrix4d Twc = kv.second->GetPose();
+    values.insert(X(kv.first), Pose3(Rot3(Twc.block<3, 3>(0, 0)), Point3(Twc.block<3, 1>(0, 3))) * Tcb);
+  }
+  for (auto& kv : mappoints) if (kv.second && kv.second->IsValid()) values.insert(P(kv.first), Point3(kv.second->GetPosition()));
+  for (auto& kv : maplines) if (kv.second && kv.second->IsValid()) values.insert(L(kv.first), PluckerLine(kv.second->GetLine3D()));
+
+  struct PtObs { int kf, lm; bool stereo; Eigen::Vector3d kp; };
+  struct LnObs { int kf, lm; bool stereo; Vector8d obs; double cov; };
+  std::vector<PtObs> pts; std::vector<LnObs> lns;
+  for (auto& kv : keyframes) {
+    FramePtr frame = kv.second; int fid = kv.first;
+    std::vector<MappointPtr>& fmpts = frame->GetAllMappoints();
+    for (size_t i = 0; i < fmpts.size(); i++) {
+      MappointPtr mpt = fmpts[i]; if (!mpt || !mpt->IsValid()) continue;
+      Eigen::Vector3d kp; if (!frame->GetKeypointPosition(i, kp)) continue;
+      if (!values.exists(P(mpt->GetId()))) continue;
+      pts.push_back({fid, mpt->GetId(), kp(2) >= 0, kp});
+    }
+    std::vector<MaplinePtr>& fmpls = frame->GetAllMaplines();
+    for (size_t i = 0; i < fmpls.size(); i++) {
+      MaplinePtr mpl = fmpls[i]; if (!mpl || !mpl->IsValid()) continue;
+      Eigen::Vector4d ll, lr; if (!frame->GetLine(i, ll)) continue;
+      if (!values.exists(L(mpl->GetId()))) continue;
+      double cov = mpl->ObverserNum() > 3 ? 0.1 : 0.001;
+      Vector8d o; o.setZero(); o.head<4>() = ll;
+      bool st = frame->GetLineRight(i, lr); if (st) o.tail<4>() = lr;
+      lns.push_back({fid, mpl->GetId(), st, o, cov});
+    }
+  }
+
+  std::vector<bool> pt_in(pts.size(), true), ln_in(lns.size(), true);
+  const double hMp = std::sqrt(cfg.mono_point), hSp = std::sqrt(cfg.stereo_point);
+  const double hMl = std::sqrt(cfg.mono_line), hSl = std::sqrt(cfg.stereo_line);
+  auto robustify = [](double k, const SharedNoiseModel& b) {
+    return noiseModel::Robust::Create(noiseModel::mEstimator::Huber::Create(k), b);
+  };
+  auto lineNoise = [](double cov, int d) { return noiseModel::Isotropic::Sigma(d, 1.0 / std::sqrt(cov)); };
+
+  auto buildGraph = [&](bool robust) {
+    NonlinearFactorGraph g;
+    g.addPrior(X(anchor), values.at<Pose3>(X(anchor)), noiseModel::Isotropic::Sigma(6, 1e-9));
+    for (size_t i = 0; i < pts.size(); i++) { if (!pt_in[i]) continue; auto& o = pts[i];
+      if (o.stereo) { SharedNoiseModel b = noiseModel::Unit::Create(3);
+        g.emplace_shared<GtsamStereoPointBAFactor>(X(o.kf), P(o.lm), Vector3(o.kp), fx, fy, cx, cy, bf, Tbc, robust ? robustify(hSp, b) : b); }
+      else { SharedNoiseModel b = noiseModel::Unit::Create(2);
+        g.emplace_shared<GtsamMonoPointBAFactor>(X(o.kf), P(o.lm), Point2(o.kp.head<2>()), fx, fy, cx, cy, Tbc, robust ? robustify(hMp, b) : b); } }
+    for (size_t i = 0; i < lns.size(); i++) { if (!ln_in[i]) continue; auto& o = lns[i];
+      if (o.stereo) { SharedNoiseModel b = lineNoise(o.cov, 4);
+        g.emplace_shared<GtsamStereoLineBAFactor>(X(o.kf), L(o.lm), o.obs, fx, fy, bf / fx, Kv, Tbc, robust ? robustify(hSl, b) : b); }
+      else { SharedNoiseModel b = lineNoise(o.cov, 2);
+        g.emplace_shared<GtsamMonoLineBAFactor>(X(o.kf), L(o.lm), o.obs.head<4>(), fx, fy, Kv, Tbc, robust ? robustify(hMl, b) : b); } }
+    return g;
+  };
+  auto depthPos = [&](const Values& v, int kf, const Point3& Xw) { return ((v.at<Pose3>(X(kf)) * Tbc).inverse() * Xw).z() > 0; };
+  auto ptChi2 = [&](const Values& v, const PtObs& o) {
+    Point3 Xw = v.at<Point3>(P(o.lm));
+    if (o.stereo) return GtsamStereoPointBAFactor(X(o.kf), P(o.lm), Vector3(o.kp), fx, fy, cx, cy, bf, Tbc, noiseModel::Unit::Create(3)).residual(v.at<Pose3>(X(o.kf)), Xw).squaredNorm();
+    return GtsamMonoPointBAFactor(X(o.kf), P(o.lm), Point2(o.kp.head<2>()), fx, fy, cx, cy, Tbc, noiseModel::Unit::Create(2)).residual(v.at<Pose3>(X(o.kf)), Xw).squaredNorm();
+  };
+  auto lnChi2 = [&](const Values& v, const LnObs& o) {
+    PluckerLine Ln = v.at<PluckerLine>(L(o.lm));
+    if (o.stereo) return o.cov * GtsamStereoLineBAFactor(X(o.kf), L(o.lm), o.obs, fx, fy, bf / fx, Kv, Tbc, lineNoise(o.cov, 4)).residual(v.at<Pose3>(X(o.kf)), Ln).squaredNorm();
+    return o.cov * GtsamMonoLineBAFactor(X(o.kf), L(o.lm), o.obs.head<4>(), fx, fy, Kv, Tbc, lineNoise(o.cov, 2)).residual(v.at<Pose3>(X(o.kf)), Ln).squaredNorm();
+  };
+
+  { LevenbergMarquardtParams p; p.setMaxIterations(first_iterations);
+    try { values = LevenbergMarquardtOptimizer(buildGraph(true), values, p).optimize(); } catch (const std::exception&) {} }
+  if (point_outlier_rejection)
+    for (size_t i = 0; i < pts.size(); i++)
+      pt_in[i] = ptChi2(values, pts[i]) <= (pts[i].stereo ? cfg.stereo_point : cfg.mono_point) && depthPos(values, pts[i].kf, values.at<Point3>(P(pts[i].lm)));
+  if (line_outlier_rejection)
+    for (size_t i = 0; i < lns.size(); i++)
+      ln_in[i] = lnChi2(values, lns[i]) <= (lns[i].stereo ? cfg.stereo_line : cfg.mono_line);
+
+  if (second_iterations > 0) {
+    LevenbergMarquardtParams p; p.setMaxIterations(second_iterations);
+    try { values = LevenbergMarquardtOptimizer(buildGraph(false), values, p).optimize(); } catch (const std::exception&) {}
+    std::vector<std::pair<FramePtr, MappointPtr>> mpt_out;
+    std::vector<std::pair<FramePtr, MaplinePtr>> mpl_out;
+    for (size_t i = 0; i < pts.size(); i++)
+      if (!(ptChi2(values, pts[i]) <= (pts[i].stereo ? cfg.stereo_point : cfg.mono_point) && depthPos(values, pts[i].kf, values.at<Point3>(P(pts[i].lm)))))
+        mpt_out.emplace_back(keyframes[pts[i].kf], mappoints[pts[i].lm]);
+    for (size_t i = 0; i < lns.size(); i++)
+      if (!(lnChi2(values, lns[i]) <= (lns[i].stereo ? cfg.stereo_line : cfg.mono_line)))
+        mpl_out.emplace_back(keyframes[lns[i].kf], maplines[lns[i].lm]);
+    map->RemoveOutliers(mpt_out);
+    map->RemoveLineOutliers(mpl_out);
+  }
+
+  for (auto& kv : keyframes) {
+    Pose3 Twc = values.at<Pose3>(X(kv.first)) * Tbc;
+    Eigen::Matrix4d M = Eigen::Matrix4d::Identity();
+    M.block<3, 3>(0, 0) = Twc.rotation().matrix(); M.block<3, 1>(0, 3) = Twc.translation();
+    kv.second->SetPose(M);
+  }
+  for (auto& kv : mappoints) if (kv.second && kv.second->IsValid() && values.exists(P(kv.first))) kv.second->SetPosition(values.at<Point3>(P(kv.first)));
+  for (auto& kv : maplines) if (kv.second && kv.second->IsValid() && values.exists(L(kv.first))) {
+    kv.second->SetLine3D(values.at<PluckerLine>(L(kv.first)).g2o_line());
+    kv.second->SetEndpointsValidStatus(map->UppdateMapline(kv.second));
+  }
 }
