@@ -36,6 +36,7 @@ public:
   void LoadMap(const std::string& map_root);
   void LoadVocabulary(const std::string voc_path);
   bool Relocalization(cv::Mat& image, Eigen::Matrix4d& pose);
+  void SetExternalQueryDescriptor(const Eigen::VectorXf& d) { _ext_query_desc = d; }  // external (e.g. AnyLoc) query descriptor
 
   Eigen::Matrix4d GetBaseFramePose();
   double GetBaseFrameTimestamp();
@@ -61,6 +62,8 @@ private:
   DinoExtractorPtr _dino_extractor;
   bool _use_dino = false;
   int _dino_topk = 10;
+  bool _ext_dino = false;              // query descriptors come from outside (SetExternalQueryDescriptor), not the extractor
+  Eigen::VectorXf _ext_query_desc;
 
   // for visualization
   RosPublisherPtr _ros_publisher;

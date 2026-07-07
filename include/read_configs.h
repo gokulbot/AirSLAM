@@ -286,6 +286,7 @@ struct RelocalizationConfigs{
   int dino_topk = 10;        // # of nearest keyframes to hand to geometric verification
   std::string dino_onnx;
   std::string dino_engine;
+  std::string dino_desc_dir; // if set, query descriptors loaded from here (external, e.g. full AnyLoc) instead of the C++ extractor
 
   RelocalizationConfigs() {}
 

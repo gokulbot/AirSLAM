@@ -37,13 +37,18 @@ MapUser::MapUser(RelocalizationConfigs& configs, ros::NodeHandle nh): _configs(c
 
   _use_dino = _configs.use_dino;
   _dino_topk = _configs.dino_topk;
+  _ext_dino = !_configs.dino_desc_dir.empty();
   if(_use_dino){
-    _dino_extractor = std::shared_ptr<DinoExtractor>(new DinoExtractor(_configs.dino_onnx, _configs.dino_engine));
-    if(!_dino_extractor->build()){
-      std::cout << "DINO extractor build FAILED; falling back to DBoW2 relocalization" << std::endl;
-      _use_dino = false;
+    if(_ext_dino){
+      std::cout << "DINO relocalization ENABLED (external query descriptors, topk=" << _dino_topk << ")" << std::endl;
     }else{
-      std::cout << "DINO relocalization ENABLED (topk=" << _dino_topk << ")" << std::endl;
+      _dino_extractor = std::shared_ptr<DinoExtractor>(new DinoExtractor(_configs.dino_onnx, _configs.dino_engine));
+      if(!_dino_extractor->build()){
+        std::cout << "DINO extractor build FAILED; falling back to DBoW2 relocalization" << std::endl;
+        _use_dino = false;
+      }else{
+        std::cout << "DINO relocalization ENABLED (topk=" << _dino_topk << ")" << std::endl;
+      }
     }
   }
 }
@@ -146,10 +151,15 @@ bool MapUser::Relocalization(cv::Mat& image, Eigen::Matrix4d& pose){
 
   // candidate selection -> frame_scores. DINO (cross-condition) or DBoW2 (default).
   std::map<FramePtr, double> frame_scores;
-  if(_use_dino && _dino_extractor){
+  if(_use_dino){
     // DINOv2 global-descriptor retrieval: cosine-rank map keyframes vs the query.
     Eigen::VectorXf qdesc;
-    if(!_dino_extractor->infer(image, qdesc)) return false;   // raw image, matches how the map descriptors were built
+    if(_ext_dino){
+      if(_ext_query_desc.size() == 0) return false;           // external (e.g. AnyLoc) descriptor set per-frame by caller
+      qdesc = _ext_query_desc;
+    }else if(!_dino_extractor || !_dino_extractor->infer(image, qdesc)){
+      return false;                                            // raw image, matches how the map descriptors were built
+    }
     std::vector<std::pair<double, FramePtr>> ranked;
     for(auto& kv : _map->GetAllKeyframes()){
       const Eigen::VectorXf& d = kv.second->GetDinoDescriptor();

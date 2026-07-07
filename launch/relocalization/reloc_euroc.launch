@@ -6,6 +6,7 @@
     <arg name="traj_path" default = "$(find air_slam)/debug/relocalization.txt" />
     <arg name="voc_path" default = "$(find air_slam)/voc/point_voc_L4.bin" />
     <arg name="map_root" default = "$(find air_slam)/debug/test" />
+    <arg name="dino_desc_dir" default = "" />
 
     <node name="relocalization" pkg="air_slam" type="relocalization" output="screen">
       <param name="config_path" type="string" value="$(arg config_path)" />
@@ -15,6 +16,7 @@
       <param name="traj_path" type="string" value="$(arg traj_path)" />
       <param name="map_root" type="string" value="$(arg map_root)" />
       <param name="voc_path" type="string" value="$(arg voc_path)" />
+      <param name="dino_desc_dir" type="string" value="$(arg dino_desc_dir)" />
     </node>
 
   <arg name="visualization" default="true" />
