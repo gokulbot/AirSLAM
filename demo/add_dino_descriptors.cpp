@@ -14,6 +14,8 @@
 #include "map.h"
 #include "frame.h"
 #include "dino_extractor.h"
+#include "anyloc_extractor.h"
+#include "place_recognition.h"
 #include "utils.h"
 
 int main(int argc, char** argv) {
@@ -22,9 +24,19 @@ int main(int argc, char** argv) {
     return 1;
   }
   const std::string onnx = argv[1], engine = argv[2], map_in = argv[3], map_out = argv[4], mav0 = argv[5];
+  const std::string vocab = (argc >= 7) ? argv[6] : "";   // vocab given -> native AnyLoc (ViT-G/VLAD), else ViT-S
 
-  DinoExtractor dino(onnx, engine);
-  if (!dino.build()) { std::cerr << "DINO engine build/load FAILED" << std::endl; return 1; }
+  GlobalDescriptorPtr ex;
+  if (!vocab.empty()) {
+    auto a = std::make_shared<AnyLocExtractor>(onnx, engine, vocab);
+    if (!a->valid()) { std::cerr << "AnyLoc vocab load FAILED" << std::endl; return 1; }
+    if (!a->build()) { std::cerr << "AnyLoc engine build/load FAILED" << std::endl; return 1; }
+    ex = a; std::cout << "baking native AnyLoc (ViT-G/VLAD) descriptors" << std::endl;
+  } else {
+    auto d = std::make_shared<DinoExtractor>(onnx, engine);
+    if (!d->build()) { std::cerr << "DINO engine build/load FAILED" << std::endl; return 1; }
+    ex = d;
+  }
 
   std::shared_ptr<Map> map(new Map());
   {
@@ -59,7 +71,7 @@ int main(int argc, char** argv) {
     cv::Mat img = cv::imread(ConcatenateFolderAndFileName(img_dir, names[best]), cv::IMREAD_GRAYSCALE);
     if (img.empty()) { ++skipped; continue; }
     Eigen::VectorXf desc;
-    if (!dino.infer(img, desc)) { ++skipped; continue; }
+    if (!ex->Compute(img, "", desc)) { ++skipped; continue; }
     f->SetDinoDescriptor(desc);
     if (first_norm < 0) first_norm = desc.norm();
     ++done;
