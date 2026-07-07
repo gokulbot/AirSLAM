@@ -35,19 +35,18 @@ MapUser::MapUser(RelocalizationConfigs& configs, ros::NodeHandle nh): _configs(c
 
   _reloc_message = std::shared_ptr<RelocMessage>(new RelocMessage);
 
-  _use_dino = _configs.use_dino;
   _dino_topk = _configs.dino_topk;
-  _ext_dino = !_configs.dino_desc_dir.empty();
-  if(_use_dino){
-    if(_ext_dino){
-      std::cout << "DINO relocalization ENABLED (external query descriptors, topk=" << _dino_topk << ")" << std::endl;
+  if(_configs.use_dino){   // build the GlobalDescriptor; the PlaceRecognizer is composed in LoadMap
+    if(!_configs.dino_desc_dir.empty()){
+      _global_descriptor = std::shared_ptr<GlobalDescriptor>(new ExternalGlobalDescriptor(_configs.dino_desc_dir));
+      std::cout << "place recognition: descriptor cosine + external query descriptors (e.g. AnyLoc), topk=" << _dino_topk << std::endl;
     }else{
-      _dino_extractor = std::shared_ptr<DinoExtractor>(new DinoExtractor(_configs.dino_onnx, _configs.dino_engine));
-      if(!_dino_extractor->build()){
-        std::cout << "DINO extractor build FAILED; falling back to DBoW2 relocalization" << std::endl;
-        _use_dino = false;
+      std::shared_ptr<DinoExtractor> dino(new DinoExtractor(_configs.dino_onnx, _configs.dino_engine));
+      if(dino->build()){
+        _global_descriptor = dino;
+        std::cout << "place recognition: descriptor cosine + DINO ViT-S extractor, topk=" << _dino_topk << std::endl;
       }else{
-        std::cout << "DINO relocalization ENABLED (topk=" << _dino_topk << ")" << std::endl;
+        std::cout << "DINO extractor build FAILED; falling back to DBoW2 place recognition" << std::endl;
       }
     }
   }
@@ -111,6 +110,10 @@ void MapUser::LoadMap(const std::string& map_root){
   _junction_database = _map->_junction_database;
   _junction_database->LoadVocabulary(_map->_junction_voc);
 
+  // compose the place recognizer now the map/database are loaded
+  _recognizer = _global_descriptor ? std::shared_ptr<PlaceRecognizer>(new DescriptorPlaceRecognizer(_map))
+                                   : std::shared_ptr<PlaceRecognizer>(new BowPlaceRecognizer(_database));
+
   _reloc_message->map_scale = _map->MapScale() / 80;
   
   _visualization_thread = std::thread(boost::bind(&MapUser::PubMap, this));
@@ -120,7 +123,7 @@ void MapUser::LoadVocabulary(const std::string voc_path){
   _database->LoadVocabulary(voc_path);
 }
 
-bool MapUser::Relocalization(cv::Mat& image, Eigen::Matrix4d& pose){
+bool MapUser::Relocalization(cv::Mat& image, const std::string& image_name, Eigen::Matrix4d& pose){
   cv::Mat image_rect;
   _camera->UndistortImage(image, image_rect);
   Eigen::Matrix<float, 259, Eigen::Dynamic> features, junctions;
@@ -149,53 +152,18 @@ bool MapUser::Relocalization(cv::Mat& image, Eigen::Matrix4d& pose){
   _database->FrameToBow(features, word_features, bow_vector, word_of_features);
   _junction_database->FrameToBow(junctions, junction_word_features, junction_bow_vector, junction_word_of_features);
 
-  // candidate selection -> frame_scores. DINO (cross-condition) or DBoW2 (default).
+  // candidate selection via the composed place recognizer (see place_recognition.h):
+  // BowPlaceRecognizer (DBoW2) or DescriptorPlaceRecognizer (DINO/AnyLoc). In descriptor mode the
+  // query descriptor is produced by the GlobalDescriptor (ViT-S engine or external AnyLoc) and stored
+  // on the frame for the recognizer. Covisibility grouping + geometric verification below are shared.
   std::map<FramePtr, double> frame_scores;
-  if(_use_dino){
-    // DINOv2 global-descriptor retrieval: cosine-rank map keyframes vs the query.
+  if(_global_descriptor){
     Eigen::VectorXf qdesc;
-    if(_ext_dino){
-      if(_ext_query_desc.size() == 0) return false;           // external (e.g. AnyLoc) descriptor set per-frame by caller
-      qdesc = _ext_query_desc;
-    }else if(!_dino_extractor || !_dino_extractor->infer(image, qdesc)){
-      return false;                                            // raw image, matches how the map descriptors were built
-    }
-    std::vector<std::pair<double, FramePtr>> ranked;
-    for(auto& kv : _map->GetAllKeyframes()){
-      const Eigen::VectorXf& d = kv.second->GetDinoDescriptor();
-      if(d.size() == qdesc.size() && d.size() > 0){
-        ranked.emplace_back(static_cast<double>(qdesc.dot(d)), kv.second);   // both unit-norm -> cosine
-      }
-    }
-    if(ranked.empty()) return false;
-    size_t K = std::min(static_cast<size_t>(_dino_topk), ranked.size());
-    std::partial_sort(ranked.begin(), ranked.begin() + K, ranked.end(),
-        [](const std::pair<double, FramePtr>& a, const std::pair<double, FramePtr>& b){ return a.first > b.first; });
-    for(size_t i = 0; i < K; i++) frame_scores[ranked[i].second] = ranked[i].first;
-  }else{
-    // DBoW2 place recognition
-    std::map<FramePtr, int> frame_sharing_words;
-    _database->Query(bow_vector, frame_sharing_words);
-    if(frame_sharing_words.empty()) return false;
-
-    int max_sharing_words = 0;
-    for(const auto& kv : frame_sharing_words){
-      max_sharing_words = kv.second > max_sharing_words ? kv.second : max_sharing_words;
-    }
-    int sharing_wrods_num_thr = std::max(static_cast<int>(max_sharing_words * 0.3f), 8);
-    for(std::map<FramePtr, int>::iterator fsw_it = frame_sharing_words.begin(); fsw_it != frame_sharing_words.end();){
-      if(fsw_it->second < sharing_wrods_num_thr){
-        fsw_it = frame_sharing_words.erase(fsw_it);
-      }else{
-        fsw_it++;
-      }
-    }
-    if(frame_sharing_words.empty()) return false;
-
-    for(auto& kv : frame_sharing_words){
-      frame_scores[kv.first] = _database->Score(_database->_frame_bow_vectors[kv.first], bow_vector);
-    }
+    if(!_global_descriptor->Compute(image, image_name, qdesc)) return false;
+    frame->SetDinoDescriptor(qdesc);
   }
+  _recognizer->Retrieve(frame, _dino_topk, frame_scores);
+  if(frame_scores.empty()) return false;
 
   int print_debug_info = 0;
   if(print_debug_info){

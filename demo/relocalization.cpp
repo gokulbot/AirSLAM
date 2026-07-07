@@ -49,18 +49,8 @@ int main(int argc, char **argv) {
     size_t pos = image_names[i].find_last_of('.');
     std::string image_idx = "fail " + image_names[i].substr(0, pos);
 
-    if(!configs.dino_desc_dir.empty()){   // external (e.g. AnyLoc) query descriptor for this frame
-      std::string dpath = ConcatenateFolderAndFileName(configs.dino_desc_dir, image_names[i].substr(0, pos) + ".f32");
-      std::ifstream df(dpath, std::ios::binary);
-      if(df){
-        df.seekg(0, std::ios::end); size_t sz = df.tellg(); df.seekg(0, std::ios::beg);
-        Eigen::VectorXf qd(sz / 4); df.read(reinterpret_cast<char*>(qd.data()), sz);
-        map_user.SetExternalQueryDescriptor(qd);
-      }
-    }
-
     auto before_infer = std::chrono::high_resolution_clock::now();
-    if(map_user.Relocalization(image, pose)){
+    if(map_user.Relocalization(image, image_names[i], pose)){
       image_idx = "success " + image_names[i].substr(0, pos);
       success_num++;
     }

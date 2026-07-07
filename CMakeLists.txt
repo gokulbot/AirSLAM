@@ -71,6 +71,7 @@ add_library(${PROJECT_NAME}_lib SHARED
   src/super_point.cpp
   src/trt_module.cpp
   src/dino_extractor.cpp
+  src/place_recognition.cpp
   src/feature_detector.cc
   src/super_glue.cpp
   src/light_glue.cpp

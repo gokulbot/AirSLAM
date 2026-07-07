@@ -35,8 +35,7 @@ public:
 
   void LoadMap(const std::string& map_root);
   void LoadVocabulary(const std::string voc_path);
-  bool Relocalization(cv::Mat& image, Eigen::Matrix4d& pose);
-  void SetExternalQueryDescriptor(const Eigen::VectorXf& d) { _ext_query_desc = d; }  // external (e.g. AnyLoc) query descriptor
+  bool Relocalization(cv::Mat& image, const std::string& image_name, Eigen::Matrix4d& pose);
 
   Eigen::Matrix4d GetBaseFramePose();
   double GetBaseFrameTimestamp();
@@ -59,11 +58,10 @@ private:
   // for relocalization
   DatabasePtr _database;
   DatabasePtr _junction_database;
-  DinoExtractorPtr _dino_extractor;
-  bool _use_dino = false;
+  // place recognition, composed from config (see place_recognition.h):
+  GlobalDescriptorPtr _global_descriptor;   // null in DBoW2 mode; DinoExtractor (ViT-S) or ExternalGlobalDescriptor (AnyLoc)
+  PlaceRecognizerPtr _recognizer;           // BowPlaceRecognizer (DBoW2) or DescriptorPlaceRecognizer (DINO/AnyLoc)
   int _dino_topk = 10;
-  bool _ext_dino = false;              // query descriptors come from outside (SetExternalQueryDescriptor), not the extractor
-  Eigen::VectorXf _ext_query_desc;
 
   // for visualization
   RosPublisherPtr _ros_publisher;
