@@ -21,3 +21,12 @@ output/ref_*.npy      # TRT-engine validation artifacts
 # model_export (PLNet source): keep code + weights, drop paper figures / caches
 model_export/PLNet/docs/figures/
 **/__pycache__/
+
+# generated global-descriptor artifacts (regenerable via experiments/dino/; large, never commit)
+# ViT-G/ViT-S ONNX + engines + VLAD vocab + ref bins + external weights + feature caches
+output/anyloc_*
+output/dinov2_*
+*.onnx.data
+output/*.bin
+output/*.npy
+*.npz
