@@ -245,6 +245,9 @@ struct MapRefinementConfigs{
   OptimizationConfig map_optimization_config;
   RosPublisherConfig ros_publisher_config;
 
+  int use_dino_loop = 0;      // 1 -> also propose loop candidates from stored DINO descriptors (cross-condition loops)
+  int dino_loop_topk = 5;
+
   MapRefinementConfigs() {}
 
   MapRefinementConfigs(const std::string& config_file_, const std::string& model_dir_){
@@ -260,6 +263,9 @@ struct MapRefinementConfigs{
     point_matcher_config.engine_file = ConcatenateFolderAndFileName(model_dir_, point_matcher_config.engine_file);
     map_optimization_config.Load(file_node["optimization"]);
     ros_publisher_config.Load(file_node["ros_publisher"]);
+
+    use_dino_loop = file_node["use_dino_loop"] ? file_node["use_dino_loop"].as<int>() : 0;
+    dino_loop_topk = file_node["dino_loop_topk"] ? file_node["dino_loop_topk"].as<int>() : 5;
   }
 };
 

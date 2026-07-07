@@ -94,40 +94,60 @@ int MapRefiner::LoopDetection(){
 
 void MapRefiner::LoopDetection(FramePtr frame, DBoW2::WordIdToFeatures& word_features, DBoW2::BowVector& bow_vector){
   int frame_id = frame->GetFrameId();
-  // query
-  std::map<FramePtr, int> frame_sharing_words;
-  _database->Query(bow_vector, frame_sharing_words);
-
-  if(frame_sharing_words.empty()) return;
-
-  // filtration
-  int max_sharing_words = 0;
-  for(const auto& kv : frame_sharing_words){
-    max_sharing_words = kv.second > max_sharing_words ? kv.second : max_sharing_words;
-  }
-  int sharing_wrods_num_thr = std::max(static_cast<int>(max_sharing_words * 0.5f), 8);
 
   std::map<FramePtr, int> covi_frames;
   _map->GetConnectedFrames(frame, covi_frames);
-  std::map<FramePtr, int>::iterator fsw_it = frame_sharing_words.begin();
-  for(; fsw_it != frame_sharing_words.end();){
-    FramePtr fsw = fsw_it->first;
-    if(fsw->GetFrameId() >= frame_id || fsw_it->second < sharing_wrods_num_thr || covi_frames.count(fsw)){
-      fsw_it = frame_sharing_words.erase(fsw_it);
-    }else{
-      fsw_it++;
+
+  // Loop candidates -> frame_scores. DBoW2 place recognition, optionally unioned with DINO
+  // global-descriptor candidates (catches cross-condition loops DBoW2 misses; false ones are
+  // rejected by the geometric verification below). Behaviour is identical when use_dino_loop=0.
+  std::map<FramePtr, double> frame_scores;
+
+  // --- DBoW2 candidates ---
+  std::map<FramePtr, int> frame_sharing_words;
+  _database->Query(bow_vector, frame_sharing_words);
+  if(!frame_sharing_words.empty()){
+    int max_sharing_words = 0;
+    for(const auto& kv : frame_sharing_words){
+      max_sharing_words = kv.second > max_sharing_words ? kv.second : max_sharing_words;
+    }
+    int sharing_wrods_num_thr = std::max(static_cast<int>(max_sharing_words * 0.5f), 8);
+    for(std::map<FramePtr, int>::iterator fsw_it = frame_sharing_words.begin(); fsw_it != frame_sharing_words.end();){
+      FramePtr fsw = fsw_it->first;
+      if(fsw->GetFrameId() >= frame_id || fsw_it->second < sharing_wrods_num_thr || covi_frames.count(fsw)){
+        fsw_it = frame_sharing_words.erase(fsw_it);
+      }else{
+        fsw_it++;
+      }
+    }
+    for(auto& kv : frame_sharing_words){
+      frame_scores[kv.first] = _database->Score(_database->_frame_bow_vectors[kv.first], bow_vector);
     }
   }
 
-  if(frame_sharing_words.empty()) return;
-
-  // scoring
-  std::map<FramePtr, double> frame_scores;
-  fsw_it = frame_sharing_words.begin();
-  for(; fsw_it != frame_sharing_words.end(); fsw_it++){
-    FramePtr fsw = fsw_it->first;
-    frame_scores[fsw] = _database->Score(_database->_frame_bow_vectors[fsw], bow_vector);
+  // --- DINO global-descriptor candidates (union with DBoW2) ---
+  if(_configs.use_dino_loop && frame->GetDinoDescriptor().size() > 0){
+    const Eigen::VectorXf& qd = frame->GetDinoDescriptor();
+    std::vector<std::pair<double, FramePtr>> ranked;
+    for(const auto& kv : _map->_keyframes){
+      FramePtr kf = kv.second;
+      if(kf->GetFrameId() >= frame_id || covi_frames.count(kf)) continue;   // earlier, non-covisible
+      const Eigen::VectorXf& kd = kf->GetDinoDescriptor();
+      if(kd.size() == qd.size() && kd.size() > 0){
+        ranked.emplace_back(static_cast<double>(qd.dot(kd)), kf);
+      }
+    }
+    if(!ranked.empty()){
+      size_t K = std::min(static_cast<size_t>(_configs.dino_loop_topk), ranked.size());
+      std::partial_sort(ranked.begin(), ranked.begin() + K, ranked.end(),
+          [](const std::pair<double, FramePtr>& a, const std::pair<double, FramePtr>& b){ return a.first > b.first; });
+      for(size_t i = 0; i < K; i++){
+        if(!frame_scores.count(ranked[i].second)) frame_scores[ranked[i].second] = ranked[i].first;
+      }
+    }
   }
+
+  if(frame_scores.empty()) return;
 
   // grouping
   std::map<FramePtr, LoopGroupCandidate> group_candidates;
