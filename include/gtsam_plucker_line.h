@@ -49,6 +49,63 @@ template <>
 struct traits<PluckerLine> : public internal::Manifold<PluckerLine> {};
 }  // namespace gtsam
 
+// Binary point reprojection factors for a FREE point (pose + Point3), for windowed BA / GlobalBA.
+// Manual g2o cam_project (depth-agnostic, matching g2o's edge which projects even behind the camera).
+class GtsamMonoPointBAFactor : public gtsam::NoiseModelFactor2<gtsam::Pose3, gtsam::Point3> {
+  gtsam::Point2 obs_;
+  double fx_, fy_, cx_, cy_;
+  gtsam::Pose3 Tbc_;
+
+ public:
+  GtsamMonoPointBAFactor(gtsam::Key poseKey, gtsam::Key pointKey, const gtsam::Point2& obs,
+                         double fx, double fy, double cx, double cy, const gtsam::Pose3& Tbc,
+                         const gtsam::SharedNoiseModel& model)
+      : gtsam::NoiseModelFactor2<gtsam::Pose3, gtsam::Point3>(model, poseKey, pointKey),
+        obs_(obs), fx_(fx), fy_(fy), cx_(cx), cy_(cy), Tbc_(Tbc) {}
+
+  gtsam::Vector2 residual(const gtsam::Pose3& Twb, const gtsam::Point3& Xw) const {
+    gtsam::Point3 Xc = (Twb * Tbc_).inverse() * Xw;
+    double zi = 1.0 / Xc.z();
+    return gtsam::Vector2(Xc.x() * zi * fx_ + cx_ - obs_.x(), Xc.y() * zi * fy_ + cy_ - obs_.y());
+  }
+  gtsam::Vector evaluateError(const gtsam::Pose3& Twb, const gtsam::Point3& Xw,
+                              boost::optional<gtsam::Matrix&> H1 = boost::none,
+                              boost::optional<gtsam::Matrix&> H2 = boost::none) const override {
+    auto f = [this](const gtsam::Pose3& p, const gtsam::Point3& x) { return this->residual(p, x); };
+    if (H1) *H1 = gtsam::numericalDerivative21<gtsam::Vector2, gtsam::Pose3, gtsam::Point3>(f, Twb, Xw);
+    if (H2) *H2 = gtsam::numericalDerivative22<gtsam::Vector2, gtsam::Pose3, gtsam::Point3>(f, Twb, Xw);
+    return residual(Twb, Xw);
+  }
+};
+
+class GtsamStereoPointBAFactor : public gtsam::NoiseModelFactor2<gtsam::Pose3, gtsam::Point3> {
+  gtsam::Vector3 obs_;   // (u, v, u_right)
+  double fx_, fy_, cx_, cy_, bf_;
+  gtsam::Pose3 Tbc_;
+
+ public:
+  GtsamStereoPointBAFactor(gtsam::Key poseKey, gtsam::Key pointKey, const gtsam::Vector3& obs,
+                           double fx, double fy, double cx, double cy, double bf, const gtsam::Pose3& Tbc,
+                           const gtsam::SharedNoiseModel& model)
+      : gtsam::NoiseModelFactor2<gtsam::Pose3, gtsam::Point3>(model, poseKey, pointKey),
+        obs_(obs), fx_(fx), fy_(fy), cx_(cx), cy_(cy), bf_(bf), Tbc_(Tbc) {}
+
+  gtsam::Vector3 residual(const gtsam::Pose3& Twb, const gtsam::Point3& Xw) const {
+    gtsam::Point3 Xc = (Twb * Tbc_).inverse() * Xw;
+    double zi = 1.0 / Xc.z();
+    double u = Xc.x() * zi * fx_ + cx_, v = Xc.y() * zi * fy_ + cy_;
+    return gtsam::Vector3(u - obs_(0), v - obs_(1), (u - bf_ * zi) - obs_(2));
+  }
+  gtsam::Vector evaluateError(const gtsam::Pose3& Twb, const gtsam::Point3& Xw,
+                              boost::optional<gtsam::Matrix&> H1 = boost::none,
+                              boost::optional<gtsam::Matrix&> H2 = boost::none) const override {
+    auto f = [this](const gtsam::Pose3& p, const gtsam::Point3& x) { return this->residual(p, x); };
+    if (H1) *H1 = gtsam::numericalDerivative21<gtsam::Vector3, gtsam::Pose3, gtsam::Point3>(f, Twb, Xw);
+    if (H2) *H2 = gtsam::numericalDerivative22<gtsam::Vector3, gtsam::Pose3, gtsam::Point3>(f, Twb, Xw);
+    return residual(Twb, Xw);
+  }
+};
+
 // Binary line reprojection factors for a FREE line (pose + PluckerLine), for windowed BA / GlobalBA.
 // Same projection as the unary factors; Jacobians are numeric (wrt both pose and line manifold).
 class GtsamMonoLineBAFactor : public gtsam::NoiseModelFactor2<gtsam::Pose3, PluckerLine> {
