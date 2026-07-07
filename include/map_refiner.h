@@ -51,6 +51,7 @@ public:
 
   int LoopDetection();
   void LoopDetection(FramePtr frame, DBoW2::WordIdToFeatures& word_features, DBoW2::BowVector& bow_vector);
+  void DinoLoopDetection(FramePtr frame, DBoW2::WordIdToFeatures& word_features);
   void RelativatePoseEstimation(FramePtr frame, DBoW2::WordIdToFeatures& word_features, 
       FramePtr loop_frame, std::vector<cv::DMatch>& loop_matches, std::map<FramePtr, LoopGroupCandidate>& group_candidates);
 

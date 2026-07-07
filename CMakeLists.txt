@@ -126,6 +126,9 @@ target_link_libraries(test_dino ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
 add_executable(add_dino_descriptors demo/add_dino_descriptors.cpp)
 target_link_libraries(add_dino_descriptors ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
 
+add_executable(dino_descriptor_io demo/dino_descriptor_io.cpp)
+target_link_libraries(dino_descriptor_io ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
+
 add_executable(relocalization demo/relocalization.cpp)
 target_link_libraries(relocalization ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
 

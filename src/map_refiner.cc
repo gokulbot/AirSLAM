@@ -86,6 +86,7 @@ int MapRefiner::LoopDetection(){
     _database->FrameToBow(frame, word_features, bow_vector, word_of_features);
     frame->DetectSentences(word_of_features);
     LoopDetection(frame, word_features, bow_vector);
+    if(_configs.use_dino_loop) DinoLoopDetection(frame, word_features);
     _database->AddFrame(frame, word_features, bow_vector);
   }
   _map_mutex.unlock();
@@ -122,28 +123,6 @@ void MapRefiner::LoopDetection(FramePtr frame, DBoW2::WordIdToFeatures& word_fea
     }
     for(auto& kv : frame_sharing_words){
       frame_scores[kv.first] = _database->Score(_database->_frame_bow_vectors[kv.first], bow_vector);
-    }
-  }
-
-  // --- DINO global-descriptor candidates (union with DBoW2) ---
-  if(_configs.use_dino_loop && frame->GetDinoDescriptor().size() > 0){
-    const Eigen::VectorXf& qd = frame->GetDinoDescriptor();
-    std::vector<std::pair<double, FramePtr>> ranked;
-    for(const auto& kv : _map->_keyframes){
-      FramePtr kf = kv.second;
-      if(kf->GetFrameId() >= frame_id || covi_frames.count(kf)) continue;   // earlier, non-covisible
-      const Eigen::VectorXf& kd = kf->GetDinoDescriptor();
-      if(kd.size() == qd.size() && kd.size() > 0){
-        ranked.emplace_back(static_cast<double>(qd.dot(kd)), kf);
-      }
-    }
-    if(!ranked.empty()){
-      size_t K = std::min(static_cast<size_t>(_configs.dino_loop_topk), ranked.size());
-      std::partial_sort(ranked.begin(), ranked.begin() + K, ranked.end(),
-          [](const std::pair<double, FramePtr>& a, const std::pair<double, FramePtr>& b){ return a.first > b.first; });
-      for(size_t i = 0; i < K; i++){
-        if(!frame_scores.count(ranked[i].second)) frame_scores[ranked[i].second] = ranked[i].first;
-      }
     }
   }
 
@@ -231,7 +210,7 @@ void MapRefiner::LoopDetection(FramePtr frame, DBoW2::WordIdToFeatures& word_fea
   });
 
   // feature matching
-  const int GoodCandidateNum = group_vector.size() <= 5 ? group_vector.size() : 5; 
+  const int GoodCandidateNum = group_vector.size() <= 5 ? group_vector.size() : 5;
   std::vector<cv::DMatch> best_matches;
   FramePtr best_candidate;
   const Eigen::Matrix<float, 259, Eigen::Dynamic>& query_features = frame->GetAllFeatures();
@@ -254,7 +233,63 @@ void MapRefiner::LoopDetection(FramePtr frame, DBoW2::WordIdToFeatures& word_fea
   }
 }
 
-void MapRefiner::RelativatePoseEstimation(FramePtr frame, DBoW2::WordIdToFeatures& word_features, 
+// Separate DINO loop pass: propose loop candidates from the stored global descriptor and verify
+// them directly, WITHOUT feeding DBoW2's covisibility grouping (whose deputy selection AnyLoc's
+// confident global cosines would hijack -> matching a right-place/wrong-viewpoint frame). This
+// only ADDS loops for frames DBoW2's local BoW missed; the DBoW2 pass above is untouched.
+void MapRefiner::DinoLoopDetection(FramePtr frame, DBoW2::WordIdToFeatures& word_features){
+  const Eigen::VectorXf& qd = frame->GetDinoDescriptor();
+  if(qd.size() == 0) return;
+  int frame_id = frame->GetFrameId();
+
+  std::map<FramePtr, int> covi_frames;
+  _map->GetConnectedFrames(frame, covi_frames);
+
+  std::vector<std::pair<double, FramePtr>> ranked;
+  for(const auto& kv : _map->_keyframes){
+    FramePtr kf = kv.second;
+    if(kf->GetFrameId() >= frame_id || covi_frames.count(kf)) continue;   // earlier, non-covisible
+    const Eigen::VectorXf& kd = kf->GetDinoDescriptor();
+    if(kd.size() == qd.size() && kd.size() > 0){
+      ranked.emplace_back(static_cast<double>(qd.dot(kd)), kf);
+    }
+  }
+  if(ranked.empty()) return;
+  size_t K = std::min(static_cast<size_t>(_configs.dino_loop_topk), ranked.size());
+  std::partial_sort(ranked.begin(), ranked.begin() + K, ranked.end(),
+      [](const std::pair<double, FramePtr>& a, const std::pair<double, FramePtr>& b){ return a.first > b.first; });
+
+  // distance filter + geometric verification (same gate as the DBoW2 path)
+  Eigen::Vector3d current_position = frame->GetPose().block<3, 1>(0, 3);
+  double loop_distance_thr = odometry_length * 0.03;
+  const Eigen::Matrix<float, 259, Eigen::Dynamic>& query_features = frame->GetAllFeatures();
+  std::vector<cv::DMatch> best_matches;
+  FramePtr best_candidate;
+  for(size_t i = 0; i < K; i++){
+    FramePtr kf = ranked[i].second;
+    double distance = (current_position - kf->GetPose().block<3, 1>(0, 3)).norm();
+    if(distance > loop_distance_thr) continue;
+    std::vector<cv::DMatch> matches;
+    _point_matcher->MatchingPoints(query_features, kf->GetAllFeatures(), matches, true);
+    if(matches.size() > best_matches.size()){
+      best_matches = matches;
+      best_candidate = kf;
+    }
+  }
+
+  if(best_matches.size() > 50){
+    std::map<FramePtr, LoopGroupCandidate> group_candidates;   // minimal group for "find more matches"
+    LoopGroupCandidate gc;
+    gc.group_frames.insert(best_candidate);
+    std::map<FramePtr, int> cand_covi;
+    _map->GetConnectedFrames(best_candidate, cand_covi);
+    for(const auto& kv : cand_covi){ if(kv.second > 10) gc.group_frames.insert(kv.first); }
+    group_candidates[best_candidate] = gc;
+    RelativatePoseEstimation(frame, word_features, best_candidate, best_matches, group_candidates);
+  }
+}
+
+void MapRefiner::RelativatePoseEstimation(FramePtr frame, DBoW2::WordIdToFeatures& word_features,
     FramePtr loop_frame, std::vector<cv::DMatch>& loop_matches, std::map<FramePtr, LoopGroupCandidate>& group_candidates){
   int frame_id = frame->GetFrameId();
 
