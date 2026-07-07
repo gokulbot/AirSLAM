@@ -71,4 +71,8 @@ class G2oBackend : public OptimizerBackend {
       bool line_outlier_rejection, int first_iterations, int second_iterations) override;
 };
 
+// Factory: picks the backend from the AIRSLAM_BACKEND env var ("g2o" default | "gtsam").
+// Lets the regression test flip backends without a rebuild; a config field can replace it later.
+OptimizerBackendPtr MakeOptimizerBackend();
+
 #endif  // OPTIMIZER_BACKEND_H_

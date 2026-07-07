@@ -34,6 +34,7 @@ find_package(CUDA REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(Boost REQUIRED)
 find_package(G2O REQUIRED)
+find_package(GTSAM REQUIRED)   # Phase 3: swappable GTSAM optimizer backend
 find_package(Gflags REQUIRED)
 find_package(Glog REQUIRED)
 
@@ -53,6 +54,7 @@ include_directories(
   ${Boost_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
   ${G2O_INCLUDE_DIR}
+  ${GTSAM_INCLUDE_DIR}
   ${GFLAGS_INCLUDE_DIRS} 
   ${GLOG_INCLUDE_DIRS}
 )
@@ -67,6 +69,7 @@ add_library(${PROJECT_NAME}_lib SHARED
   src/g2o_optimization/edge_relative_pose.cc
   src/g2o_optimization/g2o_optimization.cc
   src/optimizer_backend.cpp
+  src/gtsam_backend.cpp
   src/bow/FSuperpoint.cc
   src/bow/database.cc
   src/super_point.cpp
@@ -103,6 +106,7 @@ target_link_libraries(${PROJECT_NAME}_lib
   ${CUDA_LIBRARIES}
   ${Boost_LIBRARIES}
   ${G2O_LIBRARIES}
+  gtsam
   ${GFLAGS_LIBRARIES} 
   ${GLOG_LIBRARIES}
   yaml-cpp

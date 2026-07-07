@@ -92,7 +92,7 @@ private:
 private:
   // class
   MapRefinementConfigs _configs;
-  OptimizerBackendPtr _optimizer = std::make_shared<G2oBackend>();   // swappable backend (g2o today, GTSAM next)
+  OptimizerBackendPtr _optimizer = MakeOptimizerBackend();   // swappable backend (AIRSLAM_BACKEND=g2o|gtsam)
   PointMatcherPtr _point_matcher;
   MapPtr _map;
   CameraPtr _camera;

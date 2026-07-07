@@ -54,14 +54,15 @@ open("/tmp/_regress_gt.tum","w").write("\n".join(L)+"\n")
 def ate(traj):
     r=subprocess.run(["evo_ape","tum","/tmp/_regress_gt.tum",traj,"-a","--t_max_diff","0.05"],capture_output=True,text=True)
     m=re.search(r"\brmse\s+([\d.]+)",r.stdout); return float(m.group(1)) if m else 999.0
-loops=""
+loops=""; backend="g2o"
 import os
 if os.path.exists(mrlog):
     for l in open(mrlog):
         if "loop pairs are found" in l: loops=l.strip()
+        if "OptimizerBackend" in l and "'" in l: backend=l.split("'")[1]
 vo_ate=ate(vo) if os.path.exists(vo) else -1
 ref_ate=ate(refined)
-print(f"[regress] backend = g2o")
+print(f"[regress] backend = {backend}")
 print(f"[regress] VO-baseline ATE   = {vo_ate:.4f} m  (Frame/Localmap/IMU optimizers)")
 print(f"[regress] refined-map ATE   = {ref_ate:.4f} m  (GlobalBA + PoseGraph)  {loops}")
 if ref_ate < thresh:

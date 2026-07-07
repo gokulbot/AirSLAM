@@ -1,5 +1,8 @@
 #include "optimizer_backend.h"
+#include "gtsam_backend.h"
 #include "g2o_optimization/g2o_optimization.h"   // the existing free functions we forward to
+#include <cstdlib>
+#include <iostream>
 
 void G2oBackend::LocalmapOptimization(MapOfPoses& poses, MapOfPoints3d& points, MapOfLine3d& lines,
     MapOfVelocity& velocities, MapOfBias& biases, std::vector<CameraPtr>& camera_list,
@@ -34,4 +37,14 @@ void G2oBackend::PoseGraphOptimization(MapOfPoses& poses, std::vector<CameraPtr>
 void G2oBackend::GlobalBA(std::shared_ptr<Map> map, const OptimizationConfig& cfg, bool point_outlier_rejection,
     bool line_outlier_rejection, int first_iterations, int second_iterations) {
   ::GlobalBA(map, cfg, point_outlier_rejection, line_outlier_rejection, first_iterations, second_iterations);
+}
+
+OptimizerBackendPtr MakeOptimizerBackend() {
+  const char* env = std::getenv("AIRSLAM_BACKEND");
+  std::string name = env ? env : "g2o";
+  OptimizerBackendPtr backend =
+      (name == "gtsam") ? OptimizerBackendPtr(std::make_shared<GtsamBackend>())
+                        : OptimizerBackendPtr(std::make_shared<G2oBackend>());
+  std::cout << "[OptimizerBackend] using '" << backend->Name() << "'" << std::endl;
+  return backend;
 }

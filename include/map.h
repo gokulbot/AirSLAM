@@ -121,7 +121,7 @@ private:
 private:
   OptimizationConfig _backend_optimization_config;
   CameraPtr _camera;
-  OptimizerBackendPtr _optimizer = std::make_shared<G2oBackend>();   // swappable backend (g2o today, GTSAM next)
+  OptimizerBackendPtr _optimizer = MakeOptimizerBackend();   // swappable backend (AIRSLAM_BACKEND=g2o|gtsam)
   std::map<int, MappointPtr> _mappoints;
   std::map<int, MaplinePtr> _maplines;
   std::map<int, FramePtr> _keyframes;

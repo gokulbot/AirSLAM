@@ -52,7 +52,7 @@ public:
 private:
   // class
   RelocalizationConfigs _configs;
-  OptimizerBackendPtr _optimizer = std::make_shared<G2oBackend>();   // swappable backend (g2o today, GTSAM next)
+  OptimizerBackendPtr _optimizer = MakeOptimizerBackend();   // swappable backend (AIRSLAM_BACKEND=g2o|gtsam)
   FeatureDetectorPtr _feature_detector;
   PointMatcherPtr _point_matcher;
   MapPtr _map;
