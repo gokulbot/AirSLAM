@@ -3,8 +3,8 @@
 # loads, and emit a reference descriptor for validating the C++ VLAD against Python.
 #   output/anyloc_vocab.bin : [<ii K D>][float32 K*D]  cluster centers
 #   output/anyloc_ref.bin   : [<i D>][float32 D]       reference VLAD descriptor for ref image
-import torch, numpy as np, struct, os, glob
-from PIL import Image
+import torch, numpy as np, struct, os, glob, cv2
+import torch.nn.functional as F
 from sklearn.cluster import KMeans
 
 REPO="/home/gokul/Projects/airslam/AirSLAM"
@@ -18,10 +18,17 @@ print("fit images:", len(imgs))
 dev="cuda"
 mn=torch.tensor([0.485,0.456,0.406],device=dev).view(1,3,1,1)
 sd=torch.tensor([0.229,0.224,0.225],device=dev).view(1,3,1,1)
-def limg(p,R=224):
-    im=Image.open(p).convert("RGB").resize((R,R),Image.BILINEAR)
-    return torch.from_numpy(np.asarray(im)).float().permute(2,0,1)/255.0
+def limg(p,R=224):                                 # match the C++ deploy pipeline exactly:
+    g=cv2.imread(p,cv2.IMREAD_GRAYSCALE)           #   grayscale (add_dino / reloc read grayscale)
+    g=cv2.resize(g,(R,R))                          #   cv INTER_LINEAR
+    rgb=cv2.cvtColor(g,cv2.COLOR_GRAY2RGB)         #   replicate to 3ch (process_input GRAY2RGB)
+    return torch.from_numpy(rgb).float().permute(2,0,1)/255.0
 model=torch.hub.load("facebookresearch/dinov2","dinov2_vitg14",verbose=False).to(dev).eval().half()
+_orig=F.interpolate                                # bicubic->bilinear pos-embed, as the ONNX export does
+def _bil(*a,**k):
+    if k.get("mode")=="bicubic": k["mode"]="bilinear"; k["antialias"]=False
+    return _orig(*a,**k)
+F.interpolate=_bil
 E=model.num_features; P=(224//14)**2; cap={}
 model.blocks[31].attn.qkv.register_forward_hook(lambda m,i,o: cap.__setitem__("v",o[...,2*E:3*E].float()))
 def dense(paths):
