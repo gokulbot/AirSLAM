@@ -112,13 +112,15 @@ neither of which is a from-scratch-optimizer problem:
 - **Done when:** you can reproduce baseline ATE on ≥2 datasets and have a one-command eval script.
 - **Effort:** ~1 week (mostly build/deps pain).
 
-### Phase 1 — DINO relocalization *(the quick win that became the testbed)*
-- **Goal:** DINOv2/AnyLoc global descriptors for **cross-condition relocalization** — *not* a blanket DBoW2 replacement. (Finding: DBoW2 wins clean same-session loops; DINO/AnyLoc dominates day↔night. So DINO owns the illumination-change / reloc case; DBoW2 keeps same-session loops.)
-- **Do:** ✅ **Python prototype done** — AnyLoc (ViT-G, value-facet, VLAD) vs AirSLAM's *actual* DBoW2 (`dump_bow` tools): clean loops DBoW2 0.86 > AnyLoc 0.77; Gardens Point day→night AnyLoc **0.99** ≫ DBoW2 0.34. **Next:** wire into C++ (DINOv2 ViT-S/B → ONNX→TensorRT engine, per-keyframe descriptor stored in the map, retrieval in the **relocalization** stage + geometric verify).
-- **Learn:** VPR, VLAD aggregation, foundation-model features, ANN retrieval (FAISS).
-- **Read:** AnyLoc; SALAD; "Loop Closure using AnyLoc VPR in DPV-SLAM" (arXiv 2601.02723).
-- **Done when:** cross-condition reloc success beats DBoW2 on a day↔night / lighting-change sequence; ATE holds. *(Python retrieval bar already met.)*
-- **Effort:** weekend (Python compare ✅) → 1–2 weeks (full C++).
+### Phase 1 — DINO relocalization ✅ **DONE** *(the quick win that became the testbed)*
+- **Goal (met):** DINOv2/AnyLoc global descriptors for **cross-condition relocalization** — *not* a blanket DBoW2 replacement.
+- **Built (all native C++, in the `air_slam` build, strategy pattern — see `place_recognition.h`):**
+  - `GlobalDescriptor` {`DinoExtractor` ViT-S TensorRT · `AnyLocExtractor` **native ViT-G/14 value-facet + VLAD-32** (ONNX→TRT, VLAD in C++) · `ExternalGlobalDescriptor`} × `PlaceRecognizer` {`BowPlaceRecognizer` DBoW2 · `DescriptorPlaceRecognizer` cosine}, composed in `MapUser` by config; shared covisibility-group + LightGlue verify downstream.
+  - Per-keyframe descriptor in the map (versioned serialization); `add_dino_descriptors [--anyloc]` bake; `dino_descriptor_io` bridge. Loop closure: separate `MapRefiner::DinoLoopDetection` pass. ViT-G engine builds 1.79 GB fp16 / 44 s on an 8 GB laptop GPU → **deployable**.
+- **VERDICT (proven with ground truth, not assumed):** DINO/AnyLoc earns its keep in **exactly one place — relocalization under *genuine* darkness**: fully-native AnyLoc **71.8%** > DBoW2 69.9% > deployed ViT-S 44.9% @ mean-10 night (Glasgow extreme-lighting, Vive GT). *Everywhere else DBoW2 ≥ DINO*: moderate darkness / normal reloc (SuperPoint robust), and same-session **loop-closure ATE ties** (MH_04 0.077≈0.082, MH_05 0.0665≈0.0660 — more DINO loops ≠ better map). The full-pipeline ceiling is the **shared SuperPoint verification** (retrieval already solved: AnyLoc R@1 99.4% night) → drives **Phase 2's redirect**.
+- **Learned:** VPR, VLAD aggregation, foundation-model features, ONNX→TensorRT deployment, the retrieval-vs-verification distinction.
+- **Done when (met):** cross-condition reloc beats DBoW2 on a day↔night sequence, fully in C++, ground-truth ATE/recall. ✅
+- **Writeups:** `experiments/glasgow/README.md`, `experiments/dino/README.md`.
 
 ### Phase 2 — Fine-tune for the *real* bottleneck *(the ML-skills detour — LATER, redirected)*
 - **Status: the original premise is DEAD.** Phase 2 was "fine-tune DINOv2 to retrieve better," but Phase 1 proved **retrieval is not the bottleneck** — AnyLoc already hits R@1 99.4% at night; the full reloc caps at ~70% because the **shared SuperPoint verification** dies on dark query frames (better global descriptors can't fix a frame SuperPoint can't verify), and same-session DBoW2 is already sufficient. So *fine-tuning DINO for VPR is pointless* — it sharpens the one thing that's already excellent.
