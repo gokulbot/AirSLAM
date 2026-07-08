@@ -39,9 +39,9 @@ void G2oBackend::GlobalBA(std::shared_ptr<Map> map, const OptimizationConfig& cf
   ::GlobalBA(map, cfg, point_outlier_rejection, line_outlier_rejection, first_iterations, second_iterations);
 }
 
-OptimizerBackendPtr MakeOptimizerBackend() {
+OptimizerBackendPtr MakeOptimizerBackend(const std::string& fallback) {
   const char* env = std::getenv("AIRSLAM_BACKEND");
-  std::string name = env ? env : "g2o";
+  std::string name = env ? env : fallback;
   OptimizerBackendPtr backend =
       (name == "gtsam") ? OptimizerBackendPtr(std::make_shared<GtsamBackend>())
                         : OptimizerBackendPtr(std::make_shared<G2oBackend>());

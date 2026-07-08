@@ -1,5 +1,6 @@
 #include <iostream>
 #include <chrono>
+#include <cstdlib>
 #include <opencv2/opencv.hpp>
 #include <Eigen/Core>
 #include <ros/ros.h>
@@ -42,15 +43,22 @@ int main(int argc, char **argv) {
   int loop_num = map_refiner.LoopDetection();
   std::cout << "Done, " << loop_num << " loop pairs are found." << std::endl;
 
+  // Per-stage ATE diagnostic (opt-in): dump the keyframe trajectory after each refiner stage so we
+  // can see exactly where a backend diverges (g2o vs GTSAM). Same input map -> stage0 is identical.
+  const bool stage_dump = std::getenv("AIRSLAM_STAGE_DUMP") != nullptr;
+  if(stage_dump) map_refiner.SaveTrajectory(ConcatenateFolderAndFileName(map_root, "stage0_preposegraph.txt"));
+
   std::cout << "Optimizing pose graph..." << std::endl;
   map_refiner.PoseGraphRefinement();
   std::cout << "Done." << std::endl;
+  if(stage_dump) map_refiner.SaveTrajectory(ConcatenateFolderAndFileName(map_root, "stage1_postposegraph.txt"));
 
   map_refiner.Wait(breakpoint);
 
   std::cout << "Merging mappoints..." << std::endl;
   map_refiner.MergeMap();
   std::cout << "Done." << std::endl;
+  if(stage_dump) map_refiner.SaveTrajectory(ConcatenateFolderAndFileName(map_root, "stage2_postgba1.txt"));
 
   map_refiner.Wait(breakpoint);
 

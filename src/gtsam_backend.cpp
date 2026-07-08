@@ -436,7 +436,7 @@ void GtsamBackend::GlobalBA(std::shared_ptr<Map> map, const OptimizationConfig& 
 
   auto buildGraph = [&](bool robust) {
     NonlinearFactorGraph g;
-    g.addPrior(X(anchor), values.at<Pose3>(X(anchor)), noiseModel::Isotropic::Sigma(6, 1e-9));
+    g.addPrior(X(anchor), values.at<Pose3>(X(anchor)), noiseModel::Isotropic::Sigma(6, 1e-4));  // gauge; 1e-9 (info 1e18) wrecked Cholesky conditioning
     for (size_t i = 0; i < pts.size(); i++) { if (!pt_in[i]) continue; auto& o = pts[i];
       if (o.stereo) { SharedNoiseModel b = noiseModel::Unit::Create(3);
         g.emplace_shared<GtsamStereoPointBAFactor>(X(o.kf), P(o.lm), Vector3(o.kp), fx, fy, cx, cy, bf, Tbc, robust ? robustify(hSp, b) : b); }

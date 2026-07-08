@@ -4,6 +4,22 @@
 > learning foundation models, fine-tuning, factor-graph optimization, GPU acceleration,
 > and semantic SLAM along the way. Open-source friendly. Not chasing novelty — chasing mastery.
 
+## ⛔ DECISION LOG — 2026-07-08 (READ FIRST — supersedes the GTSAM / MHT / custom-lib parts below)
+
+**GTSAM migration PARKED. MHT dropped. Custom optimizer lib dropped. Staying on the existing g2o backend.**
+
+- **MHT / MH-iSAM2 (Phase 7) is dropped.** It was the *only* piece that uniquely required GTSAM (Bayes-tree solver surgery g2o can't do). With it gone, GTSAM's core justification is gone.
+- **The online iSAM2 smoother isn't needed either** — the deployment is **teleop-map-then-navigate** (a human drives during mapping; the robot later localizes + navigates a *pre-built* map). Uncertainty therefore lives in the **offline map**, consumed later — not in a live estimator (this is exactly load-bearing principle #5: *navigation consumes the map, never lives in the estimator*).
+- **g2o covers everything remaining:** offline BA (tuned, ATE **0.066**), **marginal covariances** (`g2o::SparseOptimizer::computeMarginals`), **semantic factors** (custom g2o edges — Phase 6). No remaining box only GTSAM checks.
+- **Phase 3–4 outcome:** the g2o→GTSAM migration (all 5 optimizers) + a live iSAM2 VIO smoother were built and validated, then **parked in-tree as a reference/learning artifact** (`AIRSLAM_BACKEND=gtsam`) — nothing depends on it. Its real value (the *“master factor graphs + iSAM2”* goal) is **fully banked**: conditioning, marginalization, robust convergence, LM internals, covariances. Not wasted — just not the runtime backend. (Backend-independent wins that stay: analytic point Jacobians, the roslaunch-hang fix.)
+- **CUDA (Phase 8):** already optional/out-of-path — stays dropped.
+
+**Simplified north star:** *illumination-robust, **semantic**, **uncertainty-aware** point-line SLAM on the existing **g2o** backend, for teleop-map-then-navigate.*
+
+**Path forward:** Phase 5 (semantic head) → Phase 6 (semantic factors as g2o edges) → uncertainty-aware map (g2o `computeMarginals`) → Phase 9 nav. All on g2o.
+
+> The phases below are **historical** wherever they assume a GTSAM / MHT / custom-lib backend. Phases 0–1 (done), 2 (redirected), **5 (semantics), 6 (semantic factors), 9 (nav)** remain valid — just retargeted onto g2o. Phases 3–4 = done+parked; Phase 7 = dropped; Phase 8 = dropped.
+
 ## Vision
 
 Take **AirSLAM** (illumination-robust point-line visual SLAM) and grow it into a
@@ -164,7 +180,7 @@ neither of which is a from-scratch-optimizer problem:
 - **Done when:** ATE improves in dynamic-scene sequences (TUM/Bonn dynamic) vs the geometric-only system.
 - **Effort:** 3–5 weeks.
 
-### Phase 7 — MHT on GTSAM's iSAM2 *(the deep, novel contribution)*
+### Phase 7 — MHT on GTSAM's iSAM2 ❌ **DROPPED (2026-07-08)** — *see decision log up top; this removed GTSAM's core justification*
 - **Goal:** Add robustness + multi-hypothesis *on top of GTSAM's iSAM2*: keep multiple ambiguous loop/association hypotheses; let optimization + semantics resolve them. The one genuinely from-scratch backend piece — solver surgery, not a factor.
 - **Do:** robust factors first (max-mixtures / switchable constraints / GNC — these *are* just factors) → then the **MH-iSAM2 "hypo-tree"** (shared subtrees across hypotheses) built by extending GTSAM's `ISAM2` internals; semantics (Phase 6) prune hypotheses. The ambiguous cross-condition matches AnyLoc surfaces (Phase 1) are exactly what this resolves.
 - **Read:** Olson & Agarwal max-mixtures; Sünderhauf switchable constraints; **MH-iSAM2 (Hsiao & Kaess 2019)** — the reference structure to build on GTSAM.

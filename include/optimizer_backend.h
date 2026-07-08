@@ -73,6 +73,8 @@ class G2oBackend : public OptimizerBackend {
 
 // Factory: picks the backend from the AIRSLAM_BACKEND env var ("g2o" default | "gtsam").
 // Lets the regression test flip backends without a rebuild; a config field can replace it later.
-OptimizerBackendPtr MakeOptimizerBackend();
+// `fallback` is the per-role default backend (Map/online -> "g2o", MapRefiner/offline -> "gtsam").
+// The AIRSLAM_BACKEND env var, when set, overrides it (used to force one backend for parity tests).
+OptimizerBackendPtr MakeOptimizerBackend(const std::string& fallback = "g2o");
 
 #endif  // OPTIMIZER_BACKEND_H_

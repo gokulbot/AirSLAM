@@ -122,7 +122,7 @@ private:
 private:
   OptimizationConfig _backend_optimization_config;
   CameraPtr _camera;
-  OptimizerBackendPtr _optimizer = MakeOptimizerBackend();   // swappable backend (AIRSLAM_BACKEND=g2o|gtsam)
+  OptimizerBackendPtr _optimizer = MakeOptimizerBackend("g2o");   // g2o (GTSAM migration PARKED -- see roadmap decision log). AIRSLAM_BACKEND=gtsam still available as a reference/learning path.
   IsamSmootherPtr _isam_smoother;   // live iSAM2 smoother, opt-in via AIRSLAM_ISAM_SMOOTHER (vision-only for now)
   std::map<int, MappointPtr> _mappoints;
   std::map<int, MaplinePtr> _maplines;

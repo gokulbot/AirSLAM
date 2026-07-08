@@ -92,7 +92,7 @@ private:
 private:
   // class
   MapRefinementConfigs _configs;
-  OptimizerBackendPtr _optimizer = MakeOptimizerBackend();   // swappable backend (AIRSLAM_BACKEND=g2o|gtsam)
+  OptimizerBackendPtr _optimizer = MakeOptimizerBackend("g2o");   // g2o (GTSAM migration PARKED -- MHT dropped, no longer justified; see roadmap decision log). AIRSLAM_BACKEND=gtsam still available as a reference/learning path.
   PointMatcherPtr _point_matcher;
   MapPtr _map;
   CameraPtr _camera;
