@@ -30,3 +30,7 @@ output/dinov2_*
 output/*.bin
 output/*.npy
 *.npz
+
+# semantic-nav eval: image artifacts + downloaded model weights (regenerable via experiments/openloris_yolo_eval/*.py)
+experiments/openloris_yolo_eval/*.jpg
+*.pt
