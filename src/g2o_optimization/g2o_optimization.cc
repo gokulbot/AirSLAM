@@ -1957,4 +1957,39 @@ void GlobalBA(MapPtr _map, const OptimizationConfig& cfg, bool point_outlier_rej
     }
   }
 
+  // 5. marginal pose covariances (opt-in: AIRSLAM_COMPUTE_COV) -- the uncertainty-aware map.
+  // computeMarginals runs on the reduced system (points/lines are Schur-marginalized), so each 6x6
+  // block is the keyframe pose uncertainty accounting for map + measurement noise. The fixed anchor
+  // has hessianIndex -1 (removed from the Hessian) -> covariance left at zero.
+  if(std::getenv("AIRSLAM_COMPUTE_COV")){
+    std::vector<g2o::OptimizableGraph::Vertex*> verts;
+    for(auto& kv : keyframes){
+      VertexVIPose* fv = static_cast<VertexVIPose*>(optimizer.vertex(kv.first));
+      if(fv && fv->hessianIndex() >= 0) verts.push_back(fv);
+    }
+    g2o::SparseBlockMatrix<Eigen::MatrixXd> spinv;
+    if(!verts.empty() && optimizer.computeMarginals(spinv, verts)){
+      double amin = 1e9, amax = 0, bmin = 1e9, bmax = 0; int n = 0;
+      for(auto& kv : keyframes){
+        VertexVIPose* fv = static_cast<VertexVIPose*>(optimizer.vertex(kv.first));
+        if(!fv) continue;
+        int hi = fv->hessianIndex();
+        if(hi < 0){ kv.second->SetPoseCovariance(Eigen::Matrix<double, 6, 6>::Zero()); continue; }
+        Eigen::MatrixXd* b = spinv.block(hi, hi);
+        if(b && b->rows() == 6 && b->cols() == 6){
+          Eigen::Matrix<double, 6, 6> cov = *b;
+          kv.second->SetPoseCovariance(cov);
+          double sa = std::sqrt(cov.block<3, 3>(0, 0).trace());
+          double sb = std::sqrt(cov.block<3, 3>(3, 3).trace());
+          amin = std::min(amin, sa); amax = std::max(amax, sa);
+          bmin = std::min(bmin, sb); bmax = std::max(bmax, sb); n++;
+        }
+      }
+      std::cout << "[cov] computeMarginals OK: " << n << " KFs | block0 sigma " << amin << "-" << amax
+                << " | block1 sigma " << bmin << "-" << bmax << std::endl;
+    } else {
+      std::cout << "[cov] computeMarginals returned false" << std::endl;
+    }
+  }
+
 }

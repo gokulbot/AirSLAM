@@ -39,6 +39,8 @@ public:
   bool PoseFixed();
   void SetPose(const Eigen::Matrix4d& pose);
   Eigen::Matrix4d& GetPose();
+  void SetPoseCovariance(const Eigen::Matrix<double, 6, 6>& cov){ _pose_covariance = cov; }
+  const Eigen::Matrix<double, 6, 6>& GetPoseCovariance() const { return _pose_covariance; }
 
   // point features
   bool FindGrid(float& x, float& y, int& grid_x, int& grid_y);
@@ -195,6 +197,10 @@ private:
       if(Archive::is_loading::value) _dino_descriptor.resize(dino_dim);
       if(dino_dim > 0) ar & boost::serialization::make_array(_dino_descriptor.data(), dino_dim);
     }
+    // v2+: pose marginal covariance (6x6, from g2o computeMarginals; zero if not computed)
+    if(version >= 2){
+      ar & boost::serialization::make_array(_pose_covariance.data(), _pose_covariance.size());
+    }
   }
 
 private:
@@ -202,6 +208,7 @@ private:
   double _timestamp;
   bool _pose_fixed;
   Eigen::Matrix4d _pose;
+  Eigen::Matrix<double, 6, 6> _pose_covariance = Eigen::Matrix<double, 6, 6>::Zero();   // g2o marginal (opt-in via AIRSLAM_COMPUTE_COV)
 
   // point features
   Eigen::Matrix<float, 259, Eigen::Dynamic> _features;
@@ -246,6 +253,6 @@ private:
 
 typedef std::shared_ptr<Frame> FramePtr;
 
-BOOST_CLASS_VERSION(Frame, 1)
+BOOST_CLASS_VERSION(Frame, 2)
 
 #endif  // FRAME_H_
