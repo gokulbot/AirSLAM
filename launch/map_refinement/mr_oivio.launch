@@ -5,7 +5,7 @@
   <arg name="voc_path" default = "$(find air_slam)/voc/point_voc_L4.bin" />
   <arg name="breakpoint" default="0"/>
 
-  <node name="map_refinement" pkg="air_slam" type="map_refinement" output="screen">
+  <node name="map_refinement" pkg="air_slam" type="map_refinement" output="screen" required="true">
     <param name="config_path" type="string" value="$(arg config_path)" />
     <param name="map_root" type="string" value="$(arg map_root)" />
     <param name="model_dir" type="string" value="$(arg model_dir)" />
