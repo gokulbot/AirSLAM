@@ -71,10 +71,21 @@ class GtsamMonoPointBAFactor : public gtsam::NoiseModelFactor2<gtsam::Pose3, gts
   gtsam::Vector evaluateError(const gtsam::Pose3& Twb, const gtsam::Point3& Xw,
                               boost::optional<gtsam::Matrix&> H1 = boost::none,
                               boost::optional<gtsam::Matrix&> H2 = boost::none) const override {
-    auto f = [this](const gtsam::Pose3& p, const gtsam::Point3& x) { return this->residual(p, x); };
-    if (H1) *H1 = gtsam::numericalDerivative21<gtsam::Vector2, gtsam::Pose3, gtsam::Point3>(f, Twb, Xw);
-    if (H2) *H2 = gtsam::numericalDerivative22<gtsam::Vector2, gtsam::Pose3, gtsam::Point3>(f, Twb, Xw);
-    return residual(Twb, Xw);
+    if (!H1 && !H2) return residual(Twb, Xw);
+    // Analytic Jacobians by chaining GTSAM primitives (each returns its Jacobian in GTSAM's tangent
+    // convention): Twc = Twb*Tbc; Xc = Twc^-1*Xw; then a trivial projection Jacobian J = d(u,v)/dXc.
+    Eigen::Matrix<double, 6, 6> Hc;
+    Eigen::Matrix<double, 3, 6> Hp;
+    Eigen::Matrix<double, 3, 3> Hx;
+    gtsam::Pose3 Twc = Twb.compose(Tbc_, Hc);
+    gtsam::Point3 Xc = Twc.transformTo(Xw, Hp, Hx);
+    double zi = 1.0 / Xc.z(), zi2 = zi * zi;
+    Eigen::Matrix<double, 2, 3> J;
+    J << fx_ * zi, 0.0, -fx_ * Xc.x() * zi2,
+         0.0, fy_ * zi, -fy_ * Xc.y() * zi2;
+    if (H1) *H1 = J * Hp * Hc;
+    if (H2) *H2 = J * Hx;
+    return gtsam::Vector2(Xc.x() * zi * fx_ + cx_ - obs_.x(), Xc.y() * zi * fy_ + cy_ - obs_.y());
   }
 };
 
@@ -99,10 +110,23 @@ class GtsamStereoPointBAFactor : public gtsam::NoiseModelFactor2<gtsam::Pose3, g
   gtsam::Vector evaluateError(const gtsam::Pose3& Twb, const gtsam::Point3& Xw,
                               boost::optional<gtsam::Matrix&> H1 = boost::none,
                               boost::optional<gtsam::Matrix&> H2 = boost::none) const override {
-    auto f = [this](const gtsam::Pose3& p, const gtsam::Point3& x) { return this->residual(p, x); };
-    if (H1) *H1 = gtsam::numericalDerivative21<gtsam::Vector3, gtsam::Pose3, gtsam::Point3>(f, Twb, Xw);
-    if (H2) *H2 = gtsam::numericalDerivative22<gtsam::Vector3, gtsam::Pose3, gtsam::Point3>(f, Twb, Xw);
-    return residual(Twb, Xw);
+    if (!H1 && !H2) return residual(Twb, Xw);
+    // Analytic Jacobians: Twc = Twb*Tbc; Xc = Twc^-1*Xw (GTSAM primitives supply d/dTwb, d/dXw);
+    // J = d(u,v,uR)/dXc. u_right = u - bf/z adds +bf/z^2 to the z-column of the 3rd row.
+    Eigen::Matrix<double, 6, 6> Hc;
+    Eigen::Matrix<double, 3, 6> Hp;
+    Eigen::Matrix<double, 3, 3> Hx;
+    gtsam::Pose3 Twc = Twb.compose(Tbc_, Hc);
+    gtsam::Point3 Xc = Twc.transformTo(Xw, Hp, Hx);
+    double zi = 1.0 / Xc.z(), zi2 = zi * zi;
+    double u = Xc.x() * zi * fx_ + cx_, v = Xc.y() * zi * fy_ + cy_;
+    Eigen::Matrix<double, 3, 3> J;
+    J << fx_ * zi, 0.0, -fx_ * Xc.x() * zi2,
+         0.0, fy_ * zi, -fy_ * Xc.y() * zi2,
+         fx_ * zi, 0.0, -fx_ * Xc.x() * zi2 + bf_ * zi2;
+    if (H1) *H1 = J * Hp * Hc;
+    if (H2) *H2 = J * Hx;
+    return gtsam::Vector3(u - obs_(0), v - obs_(1), (u - bf_ * zi) - obs_(2));
   }
 };
 

@@ -134,8 +134,30 @@ int main() {
   std::cout << "PLUCKER LINE  oplus/ominus_rt=" << d_rt << "  traits_rt=" << d_tr
             << "  binaryJac(2x4)=" << (jac_ok ? "finite&nonzero" : "BAD") << "\n";
 
+  // ---------- analytic vs numeric Jacobians (point BA factors) ----------
+  // The numericalDerivative is the oracle; analytic H (compose/transformTo chain) must match it.
+  GtsamStereoPointBAFactor spba(kPose, 99, Vector3(0, 0, 0), fx, fy, cx, cy, bf, Tbc,
+                                noiseModel::Isotropic::Sigma(3, 1.0));
+  Matrix Ha1, Ha2;
+  spba.evaluateError(Twb, Point3(Xw), Ha1, Ha2);
+  auto rs = [&](const Pose3& p, const Point3& x) { return spba.residual(p, x); };
+  double jd_spose = (Ha1 - numericalDerivative21<Vector3, Pose3, Point3>(rs, Twb, Point3(Xw))).cwiseAbs().maxCoeff();
+  double jd_spoint = (Ha2 - numericalDerivative22<Vector3, Pose3, Point3>(rs, Twb, Point3(Xw))).cwiseAbs().maxCoeff();
+
+  GtsamMonoPointBAFactor mpba(kPose, 99, Point2(0, 0), fx, fy, cx, cy, Tbc, noiseModel::Isotropic::Sigma(2, 1.0));
+  Matrix Ma1, Ma2;
+  mpba.evaluateError(Twb, Point3(Xw), Ma1, Ma2);
+  auto rm = [&](const Pose3& p, const Point3& x) { return mpba.residual(p, x); };
+  double jd_mpose = (Ma1 - numericalDerivative21<Vector2, Pose3, Point3>(rm, Twb, Point3(Xw))).cwiseAbs().maxCoeff();
+  double jd_mpoint = (Ma2 - numericalDerivative22<Vector2, Pose3, Point3>(rm, Twb, Point3(Xw))).cwiseAbs().maxCoeff();
+
+  double jac_ana = std::max(std::max(jd_spose, jd_spoint), std::max(jd_mpose, jd_mpoint));
+  std::cout << "ANALYTIC JAC  stereo(pose=" << jd_spose << " point=" << jd_spoint << ")  mono(pose="
+            << jd_mpose << " point=" << jd_mpoint << ")  -> max_err=" << jac_ana << "\n";
+
   bool ok = d_mono < 1e-6 && d_stereo < 1e-6 && d_lmono < 1e-6 && d_lstereo < 1e-6 &&
-            d_umono < 1e-6 && d_ustereo < 1e-6 && d_rt < 1e-5 && d_tr < 1e-5 && jac_ok;
-  std::cout << (ok ? "PASS: GTSAM point + line factors match g2o edges\n" : "FAIL: mismatch\n");
+            d_umono < 1e-6 && d_ustereo < 1e-6 && d_rt < 1e-5 && d_tr < 1e-5 && jac_ok && jac_ana < 1e-6;
+  std::cout << (ok ? "PASS: GTSAM point + line factors match g2o edges + analytic Jacobians match numeric\n"
+                   : "FAIL: mismatch\n");
   return ok ? 0 : 1;
 }
