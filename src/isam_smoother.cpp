@@ -71,15 +71,25 @@ void IsamSmoother::AddKeyframe(int kf_id, const gtsam::Pose3& Twb_init, bool anc
       vi_initialized_ = true;
     }
     new_values.insert(V(kf_id), Vector3(imu.vel_init));
-    new_factors.addPrior(V(kf_id), Vector3(imu.vel_init), noiseModel::Isotropic::Sigma(3, 10.0));   // loose
+    // Regularize the velocity meaningfully: sigma 10 (info 0.01) was below iSAM2's numerical floor,
+    // so a keyframe whose IMU factor didn't fully pin V(kf) went indeterminant (was v737). sigma 0.5
+    // (info 4) holds it; the IMU factors still dominate where the preintegration is good.
+    new_factors.addPrior(V(kf_id), Vector3(imu.vel_init), noiseModel::Isotropic::Sigma(3, 0.5));
     kf_with_velocity_.insert(kf_id);
     if (imu.prev_kf_id >= 0 && kf_with_velocity_.count(imu.prev_kf_id)) {
       SharedNoiseModel imuNoise;
       try { imuNoise = noiseModel::Gaussian::Covariance(imu.preint->Cov.block<9, 9>(0, 0)); }
       catch (const std::exception&) { imuNoise = SharedNoiseModel(); }
-      if (imuNoise)
+      if (imuNoise) {
         new_factors.emplace_shared<GtsamImuFactorVIO>(X(imu.prev_kf_id), V(imu.prev_kf_id), X(kf_id), V(kf_id),
                                                       kBiasKey, kGravityKey, imu.preint, imuNoise);
+        n_imu_factors_++;
+      } else {
+        std::cout << "[iSAM2] IMU factor SKIPPED kf " << kf_id << " (non-PSD preint cov)\n";
+      }
+    } else {
+      std::cout << "[iSAM2] IMU factor SKIPPED kf " << kf_id << " (prev " << imu.prev_kf_id
+                << " not in velocity set)\n";
     }
   }
 

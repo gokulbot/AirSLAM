@@ -51,6 +51,8 @@ class IsamSmoother {
   Eigen::Matrix<double, 6, 6> GetCovariance(int kf_id);
   double PositionSigma(int kf_id);         // sqrt(trace of translation covariance), metres
   int NumKeyframes() const { return static_cast<int>(kf_ids_.size()); }
+  int NumVelocities() const { return static_cast<int>(kf_with_velocity_.size()); }
+  int NumImuFactors() const { return n_imu_factors_; }
   bool IsVisualInertial() const { return vi_initialized_; }
 
  private:
@@ -66,6 +68,7 @@ class IsamSmoother {
   std::vector<int> kf_ids_;
   bool vi_initialized_ = false;
   std::set<int> kf_with_velocity_;
+  int n_imu_factors_ = 0;            // diagnostic: how many IMU factors actually got added
 };
 typedef std::shared_ptr<IsamSmoother> IsamSmootherPtr;
 
