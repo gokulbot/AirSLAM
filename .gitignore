@@ -34,3 +34,6 @@ output/*.npy
 # semantic-nav eval: image artifacts + downloaded model weights (regenerable via experiments/openloris_yolo_eval/*.py)
 experiments/openloris_yolo_eval/*.jpg
 *.pt
+
+# YOLO / model ONNX (regenerable via experiments/openloris_yolo_eval/export_yolo_onnx.py)
+*.onnx
