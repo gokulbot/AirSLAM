@@ -1631,11 +1631,19 @@ void GlobalBA(MapPtr _map, const OptimizationConfig& cfg, bool point_outlier_rej
   Eigen::Vector3d Kv;
   Kv << -fy * cx, -fx * cy, fx * fy;
 
+  // DEBUG (AIRSLAM_FAKE_DYNAMIC): flag every 5th mappoint dynamic to verify hooks 3+4 end-to-end.
+  if(std::getenv("AIRSLAM_FAKE_DYNAMIC")){
+    int k = 0, n = 0;
+    for(auto& kv : mappoints)
+      if(kv.second && kv.second->IsValid() && (k++ % 5 == 0)){ kv.second->AddDynamicObservation(true); n++; }
+    std::cout << "[dyn] FAKE_DYNAMIC: flagged " << n << " mappoints dynamic (score=1)" << std::endl;
+  }
+
   FramePtr last_frame = std::shared_ptr<Frame>(nullptr);
   for(auto& kv : keyframes){
     int frame_id = kv.first;
     FramePtr frame = kv.second;
-    
+
     int frame_vertex_id = frame_id;
 
     // 8. point edges
@@ -1648,12 +1656,14 @@ void GlobalBA(MapPtr _map, const OptimizationConfig& cfg, bool point_outlier_rej
       if(!frame->GetKeypointPosition(i, keypoint)) continue;
   
       int mpt_vertex_id = max_frame_id + mpt->GetId();
+      // Hook 3: soft dynamic down-weight. w in [0.05,1]; clamped off 0 so the point stays constrained.
+      double w = std::max(0.05, 1.0 - static_cast<double>(mpt->DynamicScore()));
       if(keypoint(2) < 0){
         EdgeSE3ProjectPoint* e = new EdgeSE3ProjectPoint();
         e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(mpt_vertex_id)));
         e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(frame_vertex_id)));
         e->setMeasurement(keypoint.head<2>());
-        e->setInformation(Eigen::Matrix2d::Identity());
+        e->setInformation(w * Eigen::Matrix2d::Identity());
         g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
         e->setRobustKernel(rk);
         rk->setDelta(thHuberMonoPoint);
@@ -1669,7 +1679,7 @@ void GlobalBA(MapPtr _map, const OptimizationConfig& cfg, bool point_outlier_rej
         e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(mpt_vertex_id)));
         e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(frame_vertex_id)));
         e->setMeasurement(keypoint);
-        e->setInformation(Eigen::Matrix3d::Identity());
+        e->setInformation(w * Eigen::Matrix3d::Identity());
         g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
         e->setRobustKernel(rk);
         rk->setDelta(thHuberStereoPoint);
@@ -1941,6 +1951,15 @@ void GlobalBA(MapPtr _map, const OptimizationConfig& cfg, bool point_outlier_rej
       Eigen::Vector3d pw = point_vertex->estimate();
       mpt->SetPosition(pw);
     }
+  }
+
+  // Hook 4: prune confirmed-dynamic points from the map (nav product). Kept (down-weighted) in the BA
+  // above; here the strongly-dynamic ones are dropped (conservative tau). SetBad() -> IsValid()==false.
+  {
+    int n_pruned = 0;
+    for(auto& kv : mappoints)
+      if(kv.second && kv.second->IsValid() && kv.second->DynamicScore() > 0.5){ kv.second->SetBad(); n_pruned++; }
+    if(n_pruned) std::cout << "[dyn] pruned " << n_pruned << " dynamic mappoints (score>0.5)" << std::endl;
   }
 
   // 4. line vertex
