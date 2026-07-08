@@ -1957,11 +1957,12 @@ void GlobalBA(MapPtr _map, const OptimizationConfig& cfg, bool point_outlier_rej
     }
   }
 
-  // 5. marginal pose covariances (opt-in: AIRSLAM_COMPUTE_COV) -- the uncertainty-aware map.
-  // computeMarginals runs on the reduced system (points/lines are Schur-marginalized), so each 6x6
-  // block is the keyframe pose uncertainty accounting for map + measurement noise. The fixed anchor
-  // has hessianIndex -1 (removed from the Hessian) -> covariance left at zero.
-  if(std::getenv("AIRSLAM_COMPUTE_COV")){
+  // 5. marginal pose covariances -- the uncertainty-aware map. computeMarginals runs on the reduced
+  // system (points/lines Schur-marginalized), so each 6x6 block is the keyframe pose uncertainty
+  // accounting for map + measurement noise. The fixed anchor has hessianIndex -1 -> covariance zero.
+  // DEFAULT-ON, but only on the heavier FINAL BA pass (first_iterations >= 30; the intermediate
+  // MergeMap pass uses 10) so we don't recompute on a throwaway result. Disable with AIRSLAM_NO_COV.
+  if(first_iterations >= 30 && !std::getenv("AIRSLAM_NO_COV")){
     std::vector<g2o::OptimizableGraph::Vertex*> verts;
     for(auto& kv : keyframes){
       VertexVIPose* fv = static_cast<VertexVIPose*>(optimizer.vertex(kv.first));
