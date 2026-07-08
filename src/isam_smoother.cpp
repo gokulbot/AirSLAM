@@ -2,18 +2,16 @@
 
 #include <cmath>
 
-#include <gtsam/geometry/Point3.h>
+#include <boost/make_shared.hpp>
+#include <gtsam/geometry/StereoPoint2.h>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/slam/PriorFactor.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
-#include <gtsam/nonlinear/ISAM2Params.h>
 
-#include "gtsam_plucker_line.h"   // GtsamStereoPointBAFactor
 #include "gtsam_imu_factor.h"     // GtsamImuFactorVIO, GravityDir
 
 using namespace gtsam;
-using symbol_shorthand::P;
 using symbol_shorthand::V;
 using symbol_shorthand::X;
 
@@ -21,48 +19,44 @@ static const Key kBiasKey = Symbol('m', 0);      // shared IMU bias (Vector6 [gy
 static const Key kGravityKey = Symbol('r', 0);   // shared gravity direction
 
 IsamSmoother::IsamSmoother(const gtsam::Pose3& body_P_camera, double fx, double fy, double cx, double cy, double bf)
-    : Tbc_(body_P_camera), fx_(fx), fy_(fy), cx_(cx), cy_(cy), bf_(bf) {
-  ISAM2Params params;
-  params.relinearizeThreshold = 0.01;
-  params.relinearizeSkip = 1;
-  const double lag = 30.0;   // keep ~30 keyframes; older ones are marginalized into a boundary prior
-  smoother_ = std::make_shared<IncrementalFixedLagSmoother>(lag, params);
+    : Tbc_(body_P_camera) {
+  K_ = boost::make_shared<Cal3_S2Stereo>(fx, fy, 0.0, cx, cy, bf / fx);   // baseline = bf/fx
+  sparams_.setDegeneracyMode(gtsam::ZERO_ON_DEGENERACY);                  // single-view/degenerate -> zero, not throw
+  sparams_.setEnableEPI(false);
+  // NB: iSAM2 dogleg was tried here and made conditioning WORSE with incremental smart-factor
+  // re-adds -- reverted. Robustness comes from the loose per-pose prior in AddKeyframe instead.
 }
 
 void IsamSmoother::AddKeyframe(int kf_id, const gtsam::Pose3& Twb_init, bool anchor,
                                const std::vector<StereoObservation>& obs, const ImuKeyframeData& imu) {
-  time_ += 1.0;
-  NonlinearFactorGraph graph;
+  NonlinearFactorGraph new_factors;
   Values new_values;
-  FixedLagSmoother::KeyTimestampMap ts;
-
+  FactorIndices to_remove;
   new_values.insert(X(kf_id), Twb_init);
-  ts[X(kf_id)] = time_;
-  if (anchor) graph.addPrior(X(kf_id), Twb_init, noiseModel::Isotropic::Sigma(6, 1e-4));
+  // anchor: tight (gauge). Every other pose: a LOOSE regularizing prior so a momentarily
+  // vision-degenerate keyframe can't make iSAM2 indeterminant. Floor ~2 m / 0.5 rad -- far above the
+  // cm-dm drift signal nav consumes, so it only bites otherwise-singular poses.
+  if (anchor) {
+    new_factors.addPrior(X(kf_id), Twb_init, noiseModel::Isotropic::Sigma(6, 1e-4));
+  } else {
+    Vector6 rs; rs << Vector3::Constant(0.5), Vector3::Constant(2.0);
+    new_factors.addPrior(X(kf_id), Twb_init, noiseModel::Diagonal::Sigmas(rs));
+  }
 
-  auto ptNoise = noiseModel::Unit::Create(3);
-  auto inWindow = [&](int kf) { return kf == kf_id || estimate_.exists(X(kf)); };
+  auto pixNoise = noiseModel::Isotropic::Sigma(3, 1.0);
+  std::vector<std::pair<int, size_t>> smart_pos;   // (landmark, position of its factor in new_factors)
   for (const auto& o : obs) {
-    if (mature_.count(o.landmark_id)) {                         // existing landmark: add this observation
-      graph.emplace_shared<GtsamStereoPointBAFactor>(X(kf_id), P(o.landmark_id), Vector3(o.keypoint),
-                                                     fx_, fy_, cx_, cy_, bf_, Tbc_, ptNoise);
-      ts[P(o.landmark_id)] = time_;                             // keep the landmark alive while observed
-    } else {                                                    // fix #1: promote only at >=2 in-window views (no loose prior)
-      pending_[o.landmark_id].push_back({kf_id, o.keypoint});
-      std::vector<std::pair<int, Eigen::Vector3d>> inwin;
-      for (auto& pk : pending_[o.landmark_id]) if (inWindow(pk.first)) inwin.push_back(pk);
-      if (inwin.size() >= 2) {
-        new_values.insert(P(o.landmark_id), Point3(o.Xw_init));
-        ts[P(o.landmark_id)] = time_;
-        for (auto& pk : inwin) {
-          graph.emplace_shared<GtsamStereoPointBAFactor>(X(pk.first), P(o.landmark_id), Vector3(pk.second),
-                                                         fx_, fy_, cx_, cy_, bf_, Tbc_, ptNoise);
-          ts[X(pk.first)] = time_;                              // refresh the co-visible keyframe
-        }
-        mature_.insert(o.landmark_id);
-        pending_.erase(o.landmark_id);
-      }
+    obs_[o.landmark_id].push_back({kf_id, o.keypoint});
+    // Rebuild a FRESH smart factor with all observations. Never mutate a factor already in iSAM2 --
+    // that desyncs its cached keys and breaks removal-by-index; the old one is removed cleanly.
+    auto sf = boost::make_shared<SmartFactor>(pixNoise, sparams_, Tbc_);
+    for (const auto& ob : obs_[o.landmark_id]) {
+      StereoPoint2 sp(ob.second(0), ob.second(2), ob.second(1));   // (uL, uR, v)
+      sf->add(sp, X(ob.first), K_);
     }
+    if (smart_idx_.count(o.landmark_id)) to_remove.push_back(smart_idx_[o.landmark_id]);
+    smart_pos.push_back({o.landmark_id, new_factors.size()});
+    new_factors.push_back(sf);
   }
 
   // --- VIO: velocity per keyframe + shared bias/gravity + IMU factor to the previous keyframe ---
@@ -71,39 +65,34 @@ void IsamSmoother::AddKeyframe(int kf_id, const gtsam::Pose3& Twb_init, bool anc
       Vector6 bias0; bias0 << imu.gyr_bias, imu.acc_bias;
       new_values.insert(kBiasKey, bias0);
       new_values.insert(kGravityKey, GravityDir(imu.Rwg));
-      Vector6 biasSig; biasSig << Vector3::Constant(0.1), Vector3::Constant(0.01);   // soft bias prior
-      graph.addPrior(kBiasKey, bias0, noiseModel::Diagonal::Sigmas(biasSig));
-      graph.addPrior(kGravityKey, GravityDir(imu.Rwg), noiseModel::Isotropic::Sigma(2, 0.5));
+      Vector6 biasSig; biasSig << Vector3::Constant(0.1), Vector3::Constant(0.01);
+      new_factors.addPrior(kBiasKey, bias0, noiseModel::Diagonal::Sigmas(biasSig));
+      new_factors.emplace_shared<PriorFactor<GravityDir>>(kGravityKey, GravityDir(imu.Rwg), noiseModel::Isotropic::Sigma(2, 0.5));
       vi_initialized_ = true;
     }
-    ts[kBiasKey] = time_; ts[kGravityKey] = time_;              // shared vars never age out
     new_values.insert(V(kf_id), Vector3(imu.vel_init));
-    ts[V(kf_id)] = time_;
-    graph.addPrior(V(kf_id), Vector3(imu.vel_init), noiseModel::Isotropic::Sigma(3, 10.0));   // loose
+    new_factors.addPrior(V(kf_id), Vector3(imu.vel_init), noiseModel::Isotropic::Sigma(3, 10.0));   // loose
     kf_with_velocity_.insert(kf_id);
-    if (imu.prev_kf_id >= 0 && kf_with_velocity_.count(imu.prev_kf_id) && inWindow(imu.prev_kf_id)) {
+    if (imu.prev_kf_id >= 0 && kf_with_velocity_.count(imu.prev_kf_id)) {
       SharedNoiseModel imuNoise;
       try { imuNoise = noiseModel::Gaussian::Covariance(imu.preint->Cov.block<9, 9>(0, 0)); }
       catch (const std::exception&) { imuNoise = SharedNoiseModel(); }
-      if (imuNoise) {
-        graph.emplace_shared<GtsamImuFactorVIO>(X(imu.prev_kf_id), V(imu.prev_kf_id), X(kf_id), V(kf_id),
-                                                kBiasKey, kGravityKey, imu.preint, imuNoise);
-        ts[X(imu.prev_kf_id)] = time_; ts[V(imu.prev_kf_id)] = time_;
-      }
+      if (imuNoise)
+        new_factors.emplace_shared<GtsamImuFactorVIO>(X(imu.prev_kf_id), V(imu.prev_kf_id), X(kf_id), V(kf_id),
+                                                      kBiasKey, kGravityKey, imu.preint, imuNoise);
     }
   }
 
-  smoother_->update(graph, new_values, ts);
-  estimate_ = smoother_->calculateEstimate();
+  ISAM2Result result = isam_.update(new_factors, new_values, to_remove);
+  for (const auto& sp : smart_pos) smart_idx_[sp.first] = result.newFactorsIndices[sp.second];
+  estimate_ = isam_.calculateEstimate();
   kf_ids_.push_back(kf_id);
 }
 
 gtsam::Pose3 IsamSmoother::GetBodyPose(int kf_id) const { return estimate_.at<Pose3>(X(kf_id)); }
 
-Eigen::Matrix<double, 6, 6> IsamSmoother::GetCovariance(int kf_id) {
-  return smoother_->getISAM2().marginalCovariance(X(kf_id));
-}
+Eigen::Matrix<double, 6, 6> IsamSmoother::GetCovariance(int kf_id) { return isam_.marginalCovariance(X(kf_id)); }
 
 double IsamSmoother::PositionSigma(int kf_id) {
-  return std::sqrt(smoother_->getISAM2().marginalCovariance(X(kf_id)).block<3, 3>(3, 3).trace());
+  return std::sqrt(isam_.marginalCovariance(X(kf_id)).block<3, 3>(3, 3).trace());
 }

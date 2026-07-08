@@ -4,26 +4,26 @@
 #include <map>
 #include <memory>
 #include <set>
-#include <utility>
 #include <vector>
 #include <Eigen/Core>
 
+#include <boost/shared_ptr.hpp>
 #include <gtsam/geometry/Pose3.h>
-#include <gtsam_unstable/nonlinear/IncrementalFixedLagSmoother.h>
+#include <gtsam/geometry/Cal3_S2Stereo.h>
+#include <gtsam/nonlinear/ISAM2.h>
+#include <gtsam_unstable/slam/SmartStereoProjectionPoseFactor.h>
 
 #include "imu.h"   // PreinterationPtr
 
-// One stereo-point observation from a keyframe (u, v, u_right); Xw_init is the landmark's initial
-// 3D position, used only the first time the landmark is seen.
+// One stereo-point observation from a keyframe (u, v, u_right).
 struct StereoObservation {
   int landmark_id;
-  Eigen::Vector3d Xw_init;
+  Eigen::Vector3d Xw_init;      // (unused by smart factors, kept for API compatibility)
   Eigen::Vector3d keypoint;
 };
 
-// Optional per-keyframe IMU data (VIO). When active, the smoother adds a velocity variable for this
-// keyframe and an IMU factor linking it to prev_kf_id via the preintegration; a shared bias +
-// gravity are created on the first VI keyframe. Empty (active=false) => vision-only keyframe.
+// Optional per-keyframe IMU data (VIO). When active, the smoother adds a velocity variable and an
+// IMU factor to prev_kf_id; a shared bias + gravity are created on the first VI keyframe.
 struct ImuKeyframeData {
   bool active = false;
   int prev_kf_id = -1;
@@ -34,21 +34,16 @@ struct ImuKeyframeData {
   Eigen::Vector3d acc_bias = Eigen::Vector3d::Zero();
 };
 
-// Incremental iSAM2 smoother for the online pipeline. Fed one keyframe at a time as VO produces
-// them, it maintains the global factor graph via the Bayes tree (relinearizing only what changed)
-// and exposes live per-keyframe marginal covariances -- the uncertainty signal that active /
-// uncertainty-aware navigation consumes. Runs ALONGSIDE the existing sliding-window BA; it is the
-// substrate for replacing the online-window + offline-global split with one online smoother.
-//
-// Points-only for now (the reprojection factors are the validated GtsamStereoPointBAFactor); lines
-// and IMU factors slot in the same way. Growth is unbounded here (fine for a demo / short runs);
-// a fixed-lag / marginalization policy is the production follow-up.
+// Incremental iSAM2 VIO smoother using STRUCTURELESS smart stereo factors: landmarks stay FREE but
+// are marginalized on-the-fly inside the factor (Schur) -- no explicit landmark variables, so a
+// landmark can never become an ill-conditioned variable at a window/marginalization boundary.
+// Degenerate landmarks (too few views / small baseline) contribute zero (ZERO_ON_DEGENERACY) rather
+// than throwing. This is the standard robust fixed-lag-VIO representation. The online job is the
+// live pose estimate + marginal covariances; GlobalBA owns the global map.
 class IsamSmoother {
  public:
   IsamSmoother(const gtsam::Pose3& body_P_camera, double fx, double fy, double cx, double cy, double bf);
 
-  // Add a keyframe: its body pose Twb (initial guess) + its stereo observations. The first keyframe
-  // should be the anchor (adds a pose prior to fix the gauge).
   void AddKeyframe(int kf_id, const gtsam::Pose3& Twb_init, bool anchor,
                    const std::vector<StereoObservation>& obs, const ImuKeyframeData& imu = ImuKeyframeData());
 
@@ -57,21 +52,20 @@ class IsamSmoother {
   double PositionSigma(int kf_id);         // sqrt(trace of translation covariance), metres
   int NumKeyframes() const { return static_cast<int>(kf_ids_.size()); }
   bool IsVisualInertial() const { return vi_initialized_; }
-  const std::vector<int>& KeyframeIds() const { return kf_ids_; }
 
  private:
-  std::shared_ptr<gtsam::IncrementalFixedLagSmoother> smoother_;   // iSAM2 + fixed-lag marginalization
+  typedef gtsam::SmartStereoProjectionPoseFactor SmartFactor;
+
+  gtsam::ISAM2 isam_;
   gtsam::Values estimate_;
   gtsam::Pose3 Tbc_;
-  double fx_, fy_, cx_, cy_, bf_;
-  double time_ = 0.0;                // keyframe counter, used as the fixed-lag "time"
-  // fix #1 (like g2o's mature map points): a landmark enters the smoother only once >=2 keyframes
-  // observe it (so it genuinely connects poses); no loose-prior crutch.
-  std::map<int, std::vector<std::pair<int, Eigen::Vector3d>>> pending_;   // immature: lm -> [(kf, keypoint)]
-  std::set<int> mature_;             // landmarks currently in the smoother
+  boost::shared_ptr<gtsam::Cal3_S2Stereo> K_;      // shared stereo calibration
+  gtsam::SmartStereoProjectionParams sparams_;
+  std::map<int, std::vector<std::pair<int, Eigen::Vector3d>>> obs_;   // landmark -> [(kf_id, keypoint)]
+  std::map<int, size_t> smart_idx_;                                   // landmark -> current iSAM2 factor index
   std::vector<int> kf_ids_;
-  bool vi_initialized_ = false;      // shared bias + gravity added?
-  std::set<int> kf_with_velocity_;   // keyframes that have a velocity variable (for IMU-factor linking)
+  bool vi_initialized_ = false;
+  std::set<int> kf_with_velocity_;
 };
 typedef std::shared_ptr<IsamSmoother> IsamSmootherPtr;
 
