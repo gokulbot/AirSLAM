@@ -20,6 +20,43 @@
 
 > The phases below are **historical** wherever they assume a GTSAM / MHT / custom-lib backend. Phases 0–1 (done), 2 (redirected), **5 (semantics), 6 (semantic factors), 9 (nav)** remain valid — just retargeted onto g2o. Phases 3–4 = done+parked; Phase 7 = dropped; Phase 8 = dropped.
 
+## 🎯 ACTIVE PLAN — Semantic Navigation POC (indoor robot, 2026-07-08)
+
+**Goal:** a semantic-navigation **POC on an indoor robot**, developed on **OpenLORIS-Scene** (T265 dual-fisheye stereo + IMU; office/cafe/corridor/home; real wheeled-robot trajectories with GT + realistic dynamics). Builds on the g2o backend + the delivered **uncertainty-aware map**. **Dynamic rejection first.** Concretizes Phases 5→6→9.
+
+**Principles:** measurement-first (test before deciding), bottom-up (perception → mapping → nav), **stop-anywhere** (each stage independently shippable + writeable).
+
+**Stage 1 — Segmentation eval (measure, don't assume).**
+- Run **pretrained COCO YOLOv8/11-seg** on OpenLORIS keyframes (NOT Grounded-SAM — 1–3 s/frame, open-vocab overkill; its only role is *offline auto-labeling* if we later fine-tune). Eyeball masks on ~20 KFs across scenes.
+- ⚠️ **FORK #1 — FISHEYE (gates everything downstream, resolve FIRST).** T265 is dual-fisheye; detectors are trained rectilinear → edge degradation. Test raw-fisheye vs undistorted-crop.
+- Decide: fine-tune needed? COCO already covers ~35 indoor classes; **fine-tune YOLO via Grounding-DINO auto-labels only if COCO underperforms / classes missing** (auto-label → distill; teaches the ML skills). More classes?
+- **Free early win:** `person` masks → **dynamic rejection** = a standalone measurable result. Per-KF gate on feature→mappoint creation; **no tracking, no new factors**. Eval: ATE vs geometric-only (TUM/Bonn-dynamic for a clean number; OpenLORIS for the realistic demo). Bank it.
+
+**Stage 2 — Track + register objects on the map.**
+- Default: **object = cluster of same-class map points**, tracked **for free** (map points are already matched across KFs by SuperPoint+LightGlue → shared points ⇒ same object; no ByteTrack/IoU tracker). Object 3D pose/extent = its points' centroid/bbox. Class per point = vote from the masks it falls in.
+- Fork: point-clusters (cheap, needs texture) vs object-landmarks (handles pointless objects). Decide by inspecting whether OpenLORIS objects carry enough feature points.
+
+**Stage 3 — Semantic residuals? (a DECISION, not a given).**
+- ⚠️ **FORK #2 — most semantics need NO new residual.** Dynamic rejection = filter; cross-class gating = filter; semantic labels = attribute → **zero new factors**.
+- A residual appears **only** with **object landmarks** (QuadricSLAM bbox↔ellipsoid, or CubeSLAM cuboid, reprojection). So Stage 3 = *"do object landmarks earn a residual?"* → measure-driven (do they improve ATE/map vs just labeling points?). Watch **double-counting** (principle #2): a semantic factor sharing pixels with point factors isn't independent → gate/down-weight, don't naively add. **Principled default: no new residual until one proves its worth.**
+
+**Stage 4 — Dense navigable map.**
+- ⚠️ **FORK #3 — DENSE DEPTH SOURCE.** T265 is fisheye-*stereo* (no direct depth): **dense fisheye-stereo** vs the **D435i RGB-D** (aligned sensor, register to the T265 frame). This choice *is* the "navigable map."
+- Keep dense **OUT of the factor graph** — fuse OctoMap (planning) / TSDF (surfaces) from optimized KF poses + depth; re-deform after loop closure & global BA (sparse-solve / dense-render; ElasticFusion/Kimera split). Self-contained module.
+
+**Stage 5 — Semantic navigation POC.**
+- Dense map + semantic labels + uncertainty-aware map → planner + goal-grounding (reuse Phase-1 AnyLoc/DINO retrieval for place/object goals). Integration + demo = the POC.
+
+**Tooling:** COCO YOLO-seg deployed **ONNX→TensorRT** (same path as the DINO/AnyLoc models) for online; **Grounding-DINO offline-only** for auto-labeling if fine-tuning; never Grounded-SAM in the online loop.
+
+**The three forks that actually decide effort:** (1) fisheye [Stage 1], (2) residual-or-not / object-landmarks [Stage 3], (3) dense depth source [Stage 4]. Everything else is mechanical.
+
+**DEFERRED to post-POC (enhancements, NOT prerequisites):**
+- **Illumination-robust PLNet** (dark-image fine-tune) — serves the illumination north star, not the indoor-nav POC (OpenLORIS is normal-lit).
+- **Depth+segmentation multitask "converged front-end"** — the compute-sharing / real-time play; only worth it *after* the POC proves value *and if* real-time is needed (the teleop-map workflow doesn't require it yet).
+
+**Maps to phases:** Stage 1–2 ≈ Phase 5 · Stage 2–3 ≈ Phase 6 · Stage 4 ≈ Phase 9 B1 · Stage 5 ≈ Phase 9 Tier A/B.
+
 ## Vision
 
 Take **AirSLAM** (illumination-robust point-line visual SLAM) and grow it into a
