@@ -880,13 +880,18 @@ void Map::LocalMapOptimization(FramePtr new_frame){
     }
     int kf_id = new_frame->GetFrameId();
     bool anchor = (_isam_smoother->NumKeyframes() == 0);
-    _isam_smoother->AddKeyframe(kf_id, Twc_p * Tcb_p, anchor, obs, imu);
-    if(kf_id % 20 == 0){   // build the whole line first so it doesn't interleave with the VO thread's stdout
+    try {
+      _isam_smoother->AddKeyframe(kf_id, Twc_p * Tcb_p, anchor, obs, imu);
+    } catch(const std::exception& e){
+      std::cout << "[iSAM2] EXCEPTION at kf " << kf_id << ": " << e.what() << std::endl;
+      throw;
+    }
+    if(_isam_smoother->NumKeyframes() % 10 == 0){   // by kf COUNT (frame-ids are sparse); one line, flushed
       std::string msg = "[iSAM2] kf " + std::to_string(kf_id) +
           (_isam_smoother->IsVisualInertial() ? " [VI]" : " [V]") + " pos-sigma=" +
           std::to_string(_isam_smoother->PositionSigma(kf_id) * 1000) + "mm (" +
           std::to_string(_isam_smoother->NumKeyframes()) + " kfs)\n";
-      std::cout << msg;
+      std::cout << msg << std::flush;
     }
   }
 }
