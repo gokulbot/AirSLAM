@@ -67,6 +67,14 @@ Files that must be present (portable):
 
 First `catkin_make` + run rebuilds every engine from the ONNX (slow once, cached after).
 
+### Regenerate instead of transfer (no old machine? everything is reproducible)
+Nothing here is irreplaceable — rsync is just faster:
+- **engines** → auto-rebuild from ONNX (nothing to do)
+- **DINO/AnyLoc** → `python experiments/dino/export_onnx.py`, `export_anyloc_onnx.py`, `fit_anyloc_vocab.py`
+- **YOLO** → `python experiments/openloris_yolo_eval/export_yolo_onnx.py`
+- **PLNet / SuperGlue / LightGlue / DBoW vocab** → AirSLAM upstream model download
+- Regenerated artifacts are *functionally equivalent*, not byte-identical — fine for a working setup; rsync only if you need to reproduce an exact past number.
+
 ---
 
 ## Datasets — gitignored, transfer or download
@@ -76,6 +84,7 @@ rsync from the old machine (fastest), or fetch:
 | **EuRoC** | https://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets (mav0 folders) |
 | **OpenLORIS** | form → GDrive: https://lifelong-robotic-vision.github.io/dataset/scene.html (rosbags → extract to mav0) |
 | **VIODE** | Zenodo https://zenodo.org/records/4493401 → `tools/viode/extract_viode_bag.py <bag> datasets/viode/<seq>` |
+| **Glasgow** (Phase-1 day/night reloc) | HuggingFace `joe3012/glasgow-extreme-lighting-slam-dataset` (real stereo + Vive GT) |
 
 Layout AirSLAM expects: `datasets/<name>/<seq>/mav0/{cam0,cam1}/data/*.png + imu0/data.csv` and `datasets/<name>/<seq>/groundtruth.txt` (TUM).
 
