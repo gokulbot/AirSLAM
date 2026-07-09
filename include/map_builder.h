@@ -15,6 +15,7 @@
 #include "point_matcher.h"
 #include "line_processor.h"
 #include "feature_detector.h"
+#include "yolo_detector.h"
 #include "map.h"
 #include "ros_publisher.h"
 #include "g2o_optimization/types.h"
@@ -74,7 +75,7 @@ public:
   int FramePoseOptimization(FramePtr frame0, FramePtr frame, std::vector<MappointPtr>& mappoints, std::vector<int>& inliers, 
       Preinteration& preinteration);
   int AddKeyframeCheck(FramePtr ref_keyframe, FramePtr current_frame, const std::vector<cv::DMatch>&);
-  void InsertKeyframe(FramePtr frame);
+  void InsertKeyframe(FramePtr frame, const cv::Mat& image);
 
   void PublishFrame(FramePtr frame, cv::Mat& image, FrameType frame_type, std::vector<cv::DMatch>& matches);
   void SaveTrajectory();
@@ -124,6 +125,7 @@ private:
   CameraPtr _camera;
   PointMatcherPtr _point_matcher;
   FeatureDetectorPtr _feature_detector;
+  YoloDetectorPtr _yolo_detector;   // dynamic-object detector (opt-in via AIRSLAM_YOLO_ONNX); null = off
   RosPublisherPtr _ros_publisher;
   MapPtr _map;
 };

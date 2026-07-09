@@ -27,6 +27,12 @@ MapBuilder::MapBuilder(VisualOdometryConfigs& configs, ros::NodeHandle nh): _shu
   _preinteration_keyframe.SetNoiseAndWalk(_camera->GyrNoise(), _camera->AccNoise(), _camera->GyrWalk(), _camera->AccWalk());
   _point_matcher = std::shared_ptr<PointMatcher>(new PointMatcher(configs.point_matcher_config));
   _feature_detector = std::shared_ptr<FeatureDetector>(new FeatureDetector(configs.plnet_config));
+  if(const char* yolo_onnx = std::getenv("AIRSLAM_YOLO_ONNX")){   // dynamic-object rejection (opt-in)
+    std::string onnx(yolo_onnx);
+    _yolo_detector = std::make_shared<YoloDetector>(onnx, onnx + ".engine");
+    if(!_yolo_detector->build()){ std::cout << "[yolo] engine build FAILED -> dynamic rejection OFF" << std::endl; _yolo_detector.reset(); }
+    else std::cout << "[yolo] dynamic-object detector ready: " << onnx << std::endl;
+  }
   _ros_publisher = std::shared_ptr<RosPublisher>(new RosPublisher(configs.ros_publisher_config, nh));
   _map = std::shared_ptr<Map>(new Map(_configs.backend_optimization_config, _camera, _ros_publisher));
 
@@ -189,7 +195,7 @@ void MapBuilder::TrackingThread(){
       _preinteration_keyframe.SetBias(Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(), false);
       frame->SetIMUPreinteration(_preinteration_keyframe);
 
-      InsertKeyframe(frame);
+      InsertKeyframe(frame, image_left_rect);
       _last_keyframe_tracking = frame;
       _last_tracked_frame = frame;
       _last_keyimage = image_left_rect;
@@ -214,7 +220,7 @@ void MapBuilder::TrackingThread(){
 
     if(frame_type == FrameType::KeyFrame){
       std::cout << "insert keyframe, id = " << frame->GetFrameId() << std::endl;
-      InsertKeyframe(frame);
+      InsertKeyframe(frame, image_left_rect);
       _last_keyframe_tracking = frame;
       _last_keyimage = image_left_rect;
     }
@@ -465,7 +471,7 @@ int MapBuilder::AddKeyframeCheck(FramePtr ref_keyframe, FramePtr current_frame, 
   return 2;
 }
 
-void MapBuilder::InsertKeyframe(FramePtr frame){
+void MapBuilder::InsertKeyframe(FramePtr frame, const cv::Mat& image){
   // create new track id
   std::vector<int>& track_ids = frame->GetAllTrackIds();
   for(size_t i = 0; i < track_ids.size(); i++){
@@ -483,7 +489,24 @@ void MapBuilder::InsertKeyframe(FramePtr frame){
   }
 
   // insert keyframe to map
-  _map->InsertKeyframe(frame); 
+  _map->InsertKeyframe(frame);
+
+  // Dynamic-object rejection (opt-in): run YOLO on this keyframe once, and flag each observed map point
+  // whose keypoint falls inside a person box -> Mappoint::AddDynamicObservation. Keyframe rate, inline.
+  if(_yolo_detector && !image.empty()){
+    std::vector<cv::Rect> boxes;
+    if(_yolo_detector->Detect(image, boxes) && !boxes.empty()){
+      const std::vector<cv::KeyPoint>& kps = frame->GetAllKeypoints();
+      std::vector<MappointPtr>& mpts = frame->GetAllMappoints();
+      for(size_t i = 0; i < mpts.size() && i < kps.size(); i++){
+        if(!mpts[i]) continue;
+        cv::Point p(cvRound(kps[i].pt.x), cvRound(kps[i].pt.y));
+        bool dyn = false;
+        for(const auto& b : boxes){ if(b.contains(p)){ dyn = true; break; } }
+        mpts[i]->AddDynamicObservation(dyn);
+      }
+    }
+  }
 
   _track_id = _map->UpdateFrameTrackIds(_track_id);
   _line_track_id = _map->UpdateFrameLineTrackIds(_line_track_id);
