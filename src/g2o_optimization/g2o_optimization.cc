@@ -1639,6 +1639,10 @@ void GlobalBA(MapPtr _map, const OptimizationConfig& cfg, bool point_outlier_rej
     std::cout << "[dyn] FAKE_DYNAMIC: flagged " << n << " mappoints dynamic (score=1)" << std::endl;
   }
 
+  // A/B isolation (AIRSLAM_NO_DYNREJ): refine the SAME map with the dynamic hooks OFF (w=1, no prune),
+  // to separate the dynamic-rejection effect from VO run-to-run noise.
+  const bool no_dynrej = std::getenv("AIRSLAM_NO_DYNREJ") != nullptr;
+
   FramePtr last_frame = std::shared_ptr<Frame>(nullptr);
   for(auto& kv : keyframes){
     int frame_id = kv.first;
@@ -1657,7 +1661,7 @@ void GlobalBA(MapPtr _map, const OptimizationConfig& cfg, bool point_outlier_rej
   
       int mpt_vertex_id = max_frame_id + mpt->GetId();
       // Hook 3: soft dynamic down-weight. w in [0.05,1]; clamped off 0 so the point stays constrained.
-      double w = std::max(0.05, 1.0 - static_cast<double>(mpt->DynamicScore()));
+      double w = no_dynrej ? 1.0 : std::max(0.05, 1.0 - static_cast<double>(mpt->DynamicScore()));
       if(keypoint(2) < 0){
         EdgeSE3ProjectPoint* e = new EdgeSE3ProjectPoint();
         e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(mpt_vertex_id)));
@@ -1955,7 +1959,7 @@ void GlobalBA(MapPtr _map, const OptimizationConfig& cfg, bool point_outlier_rej
 
   // Hook 4: prune confirmed-dynamic points from the map (nav product). Kept (down-weighted) in the BA
   // above; here the strongly-dynamic ones are dropped (conservative tau). SetBad() -> IsValid()==false.
-  {
+  if(!no_dynrej) {
     int n_pruned = 0;
     for(auto& kv : mappoints)
       if(kv.second && kv.second->IsValid() && kv.second->DynamicScore() > 0.5){ kv.second->SetBad(); n_pruned++; }

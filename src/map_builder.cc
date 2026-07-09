@@ -491,20 +491,50 @@ void MapBuilder::InsertKeyframe(FramePtr frame, const cv::Mat& image){
   // insert keyframe to map
   _map->InsertKeyframe(frame);
 
-  // Dynamic-object rejection (opt-in): run YOLO on this keyframe once, and flag each observed map point
-  // whose keypoint falls inside a person box -> Mappoint::AddDynamicObservation. Keyframe rate, inline.
+  // Dynamic-object rejection (opt-in): run YOLO once per keyframe, and flag a map point dynamic only if
+  // BOTH (a) its keypoint is inside a person box (CLASS evidence) AND (b) it FAILS a reprojection check --
+  // its prior triangulated position, reprojected into THIS keyframe, lands far from where it is actually
+  // observed (= it MOVED). Class alone over-rejects (person boxes swallow the static wall/desk behind them,
+  // and a person sitting still is valid static structure); the motion gate keeps static points trusted and
+  // only down-weights genuinely moving ones. Keyframe rate, inline.
   if(_yolo_detector && !image.empty()){
     std::vector<cv::Rect> boxes;
     if(_yolo_detector->Detect(image, boxes) && !boxes.empty()){
       const std::vector<cv::KeyPoint>& kps = frame->GetAllKeypoints();
       std::vector<MappointPtr>& mpts = frame->GetAllMappoints();
+      const Eigen::Matrix4d& Twc = frame->GetPose();                    // GetPose() is Twc (camera in world)
+      const Eigen::Matrix3d Rcw = Twc.block<3,3>(0,0).transpose();
+      const Eigen::Vector3d tcw = -Rcw * Twc.block<3,1>(0,3);
+      const double fx = _camera->Fx(), fy = _camera->Fy(), cx = _camera->Cx(), cy = _camera->Cy();
+      const char* mpx = std::getenv("AIRSLAM_MOTION_PX");
+      const double m = mpx ? std::atof(mpx) : 4.0;                      // motion threshold (px), tunable
+      const double motion_thr2 = m * m;
+      int n_box = 0, n_move = 0;
       for(size_t i = 0; i < mpts.size() && i < kps.size(); i++){
         if(!mpts[i]) continue;
         cv::Point p(cvRound(kps[i].pt.x), cvRound(kps[i].pt.y));
+        bool in_box = false;
+        for(const auto& b : boxes){ if(b.contains(p)){ in_box = true; break; } }
         bool dyn = false;
-        for(const auto& b : boxes){ if(b.contains(p)){ dyn = true; break; } }
+        if(in_box){
+          n_box++;
+          // MOTION gate. Skip freshly-created points (ObverserNum<2 -> no prior-view position, the test
+          // would be circular); for established points reproject their (prior) position into this KF.
+          if(mpts[i]->ObverserNum() >= 2){
+            Eigen::Vector3d Pc = Rcw * mpts[i]->GetPosition() + tcw;
+            if(Pc(2) > 1e-3){
+              double du = fx * Pc(0)/Pc(2) + cx - kps[i].pt.x;
+              double dv = fy * Pc(1)/Pc(2) + cy - kps[i].pt.y;
+              dyn = (du*du + dv*dv) > motion_thr2;                      // moving iff reprojection residual large
+            }
+          }
+          if(dyn) n_move++;
+        }
         mpts[i]->AddDynamicObservation(dyn);
       }
+      if(std::getenv("AIRSLAM_DYN_DEBUG") && n_box > 0)
+        std::cout << "[dyn] kf " << frame->GetFrameId() << ": " << n_box << " box-pts, "
+                  << n_move << " flagged moving (thr " << m << "px)" << std::endl;
     }
   }
 
