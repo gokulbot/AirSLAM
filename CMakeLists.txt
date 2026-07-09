@@ -76,6 +76,7 @@ add_library(${PROJECT_NAME}_lib SHARED
   src/super_point.cpp
   src/trt_module.cpp
   src/dino_extractor.cpp
+  src/yolo_detector.cpp
   src/anyloc_extractor.cpp
   src/place_recognition.cpp
   src/feature_detector.cc
@@ -137,6 +138,9 @@ target_link_libraries(test_anyloc ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
 
 add_executable(test_gtsam_factors demo/test_gtsam_factors.cpp)
 target_link_libraries(test_gtsam_factors ${PROJECT_NAME}_lib ${catkin_LIBRARIES} gtsam)
+
+add_executable(test_yolo demo/test_yolo.cpp)
+target_link_libraries(test_yolo ${PROJECT_NAME}_lib ${catkin_LIBRARIES})
 
 add_executable(test_localmap_parity demo/test_localmap_parity.cpp)
 target_link_libraries(test_localmap_parity ${PROJECT_NAME}_lib ${catkin_LIBRARIES} gtsam)
