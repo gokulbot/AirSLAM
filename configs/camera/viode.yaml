@@ -1,0 +1,40 @@
+%YAML:1.0
+# VIODE (simulated) city_day, stereo + IMU. Pinhole, zero distortion, 50mm baseline.
+# Calibration from kminoda/VIODE calibration_files/{cam0,cam1}_pinhole.yaml + calibration.yaml.
+
+image_height: 480
+image_width: 752
+use_imu: 1
+
+depth_lower_thr: 0.1
+depth_upper_thr: 40.0    # outdoor city scene -> larger depth range
+max_y_diff: 1
+
+# Calibration
+distortion_type: 1  # radtan (all coeffs 0 -> VIODE is already rectified pinhole)
+cam0:
+  intrinsics: [376.0, 376.0, 376.0, 240.0]  # fx, fy, cx, cy
+  distortion_coeffs: [0.0, 0.0, 0.0, 0.0, 0.0]
+  T_type: 0           # Euroc format: T is Tbc (body_T_cam0)
+  T:
+  - [0.0, 0.0, 1.0, 0.0]
+  - [1.0, 0.0, 0.0, 0.0]
+  - [0.0, 1.0, 0.0, 0.0]
+  - [0.0, 0.0, 0.0, 1.0]
+cam1:
+  intrinsics: [376.0, 376.0, 376.0, 240.0]
+  distortion_coeffs: [0.0, 0.0, 0.0, 0.0, 0.0]
+  T_type: 0
+  T:
+  - [0.0, 0.0, 1.0, 0.0]
+  - [1.0, 0.0, 0.0, 0.05]
+  - [0.0, 1.0, 0.0, 0.0]
+  - [0.0, 0.0, 0.0, 1.0]
+
+# IMU (VIODE calibration.yaml: acc_n=0.2, gyr_n=0.05, acc_w=0.02, gyr_w=4e-5)
+rate_hz: 200
+gyroscope_noise_density: 0.05
+gyroscope_random_walk: 4.0e-5
+accelerometer_noise_density: 0.2
+accelerometer_random_walk: 0.02
+g_value: 9.81007

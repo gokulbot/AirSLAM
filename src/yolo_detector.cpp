@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <sstream>
 #include <opencv2/dnn.hpp>
 
 using namespace tensorrt_log;
@@ -11,6 +14,15 @@ YoloDetector::YoloDetector(const std::string& onnx_file, const std::string& engi
                            float conf_thr, float iou_thr)
     : TRTModule(onnx_file, engine_file), conf_thr_(conf_thr), iou_thr_(iou_thr) {
   setReportableSeverity(Logger::Severity::kINTERNAL_ERROR);
+  // Dynamic-class override: AIRSLAM_YOLO_CLASSES="2,3,5,7" -> vehicles (car/moto/bus/truck) for driving
+  // scenes; default {0} = person for indoor. The motion gate still separates moving from parked.
+  if (const char* cls = std::getenv("AIRSLAM_YOLO_CLASSES")) {
+    dynamic_classes_.clear();
+    std::stringstream ss(cls);
+    std::string tok;
+    while (std::getline(ss, tok, ',')) if (!tok.empty()) dynamic_classes_.push_back(std::stoi(tok));
+    std::cout << "[yolo] dynamic classes overridden: " << cls << std::endl;
+  }
 }
 
 bool YoloDetector::configure_network(TensorRTUniquePtr<nvinfer1::IBuilder>& builder,

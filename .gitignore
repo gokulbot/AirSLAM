@@ -37,3 +37,6 @@ experiments/openloris_yolo_eval/*.jpg
 
 # YOLO / model ONNX (regenerable via experiments/openloris_yolo_eval/export_yolo_onnx.py)
 *.onnx
+
+# Rerun recordings (regenerable via scratchpad/viode_rerun.py)
+*.rrd
